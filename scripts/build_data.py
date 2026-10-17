@@ -5,18 +5,30 @@ Fetches open data once for a fixed BBOX, joins it per building and writes
 data/pasila-data.js (one global object), so the frontend needs no backend:
     python scripts/build_data.py
 
-Only official open data is used, every source is CC BY 4.0:
+Only official open data with a verified licence is used, every source is CC BY 4.0:
   - Helsinki building footprints + register   kartta.hel.fi WFS  Rakennukset_alue_rekisteritiedot   (hri.fi: helsingin-rakennukset)
   - Helsinki protected buildings / plans      kartta.hel.fi WFS  Asemakaavoissa_suojellut..., Kaavahakemisto_*
+  - Helsinki plan units (plot zoning)         kartta.hel.fi WFS  Kaavayksikot (permitted use, building rights)
   - Ryhti buildings, addresses, permits       paikkatiedot.ymparisto.fi OGC API Features  (Syke open data)
   - Prices of old dwellings by postal code    Statistics Finland PxWeb  StatFin/ashi/13mu
   - Postal code area statistics (Paavo)       Statistics Finland PxWeb  Postinumeroalueittainen_avoin_tieto/12f7
   - Events                                    Linked Events API (api.hel.fi)                    (hri.fi: linked-events-tapahtumarajapinta)
-  - Code list labels                          koodistot.suomi.fi
+  - Classification of Buildings 2018          Statistics Finland classifications API (data.stat.fi)
+  - Helsinki register code explanations       scripts/helsinki_building_codes.json (from the helsingin-rakennukset dataset)
+
+Code-list labels from koodistot.suomi.fi are NOT used: the service publishes no licence for its content.
+
+The app is English-only. Official English labels are used wherever the source publishes them;
+values without an official translation stay in Finnish and are listed at the end of the build
+(input for a later machine-translation step). Footprint geometries are never modified.
 """
 import json
+import re
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -24,18 +36,34 @@ from pathlib import Path
 BBOX = [24.915, 60.191, 24.950, 60.209]
 
 ROOT = Path(__file__).resolve().parent.parent
+HELSINKI_CODES = json.loads((Path(__file__).resolve().parent / "helsinki_building_codes.json").read_text(encoding="utf-8"))
 OUT = ROOT / "data" / "pasila-data.js"
+INDEX = ROOT / "index.html"
 
 RYHTI = "https://paikkatiedot.ymparisto.fi/geoserver"
+PXWEB = "https://pxdata.stat.fi/PxWeb/api/v1"
+
+# Finnish values that have no official English label (filled during the build)
+UNTRANSLATED = set()
 
 
-def get_json(url, data=None):
-    req = urllib.request.Request(url, headers={"User-Agent": "pasila-app/1.0"})
-    if data is not None:
-        req.add_header("Content-Type", "application/json")
-        data = json.dumps(data).encode()
-    with urllib.request.urlopen(req, data=data, timeout=120) as r:
-        return json.load(r)
+def get_json(url, data=None, retries=3):
+    """GET (or POST JSON) with retries on timeouts, 429 and 5xx."""
+    body = json.dumps(data).encode() if data is not None else None
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(url, data=body, headers={"User-Agent": "pasila-app/1.0"})
+        if body is not None:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code != 429 and e.code < 500 or attempt == retries:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == retries:
+                raise
+        time.sleep(2 ** attempt)
 
 
 # ---------- Geometry helpers (lon/lat, small area so planar math is fine) ----------
@@ -48,6 +76,12 @@ def polygons_of(geom):
     if geom["type"] == "MultiPolygon":
         return geom["coordinates"]
     return []  # lines/points carry no area
+
+
+def bounds_of(geom):
+    xs = [c[0] for poly in polygons_of(geom) for c in poly[0]]
+    ys = [c[1] for poly in polygons_of(geom) for c in poly[0]]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def point_in_ring(x, y, ring):
@@ -91,6 +125,47 @@ def in_bbox(x, y):
     return BBOX[0] <= x <= BBOX[2] and BBOX[1] <= y <= BBOX[3]
 
 
+# ---------- Labels ----------
+
+_codelists = {}  # (source, scheme) -> {code: {"fi": ..., "en": ...}}
+
+BUILDING_CLASSIFICATION = "rakennus_1_20180712"  # Classification of Buildings 2018, Statistics Finland
+
+
+def load_building_classification():
+    """Classification of Buildings 2018 (fi + en) from the Statistics Finland classifications API."""
+    labels = {}
+    for lang in ("fi", "en"):
+        url = (f"https://data.stat.fi/api/classifications/v2/classifications/{BUILDING_CLASSIFICATION}"
+               f"/classificationItems?content=data&meta=max&lang={lang}&format=json")
+        try:
+            for item in get_json(url):
+                labels.setdefault(item["code"], {})[lang] = item["classificationItemNames"][0]["name"]
+        except Exception as e:  # labels are optional
+            print("  building classification failed", lang, e)
+    _codelists[("statfi", BUILDING_CLASSIFICATION)] = labels
+
+
+def english(fi, en=None):
+    """Official English label if available, otherwise the Finnish value (recorded for translation)."""
+    if en:
+        return en
+    if fi:
+        UNTRANSLATED.add(fi)
+    return fi
+
+
+def helsinki_code(scheme, code):
+    """Helsinki register code -> Finnish label from the dataset's code explanations."""
+    return english(HELSINKI_CODES[scheme].get(str(code))) if code else None
+
+
+def building_class(code, fallback_fi):
+    """Helsinki c_rakennusluokka -> Classification of Buildings 2018 label."""
+    label = _codelists.get(("statfi", BUILDING_CLASSIFICATION), {}).get(code or "")
+    return english(label.get("fi"), label.get("en")) if label else english(fallback_fi)
+
+
 # ---------- Fetchers ----------
 
 def fetch_wfs(layer):
@@ -115,31 +190,9 @@ def fetch_ogc(path):
     return out
 
 
-_codelists = {}
-
-
-def code_label(uri):
-    """Resolve http://uri.suomi.fi/codelist/<registry>/<scheme>/code/<value> to its Finnish label."""
-    if not uri or "/code/" not in uri:
-        return None
-    head, value = uri.split("/code/")
-    registry, scheme = head.split("/codelist/")[1].split("/")
-    key = (registry, scheme)
-    if key not in _codelists:
-        try:
-            api = (f"https://koodistot.suomi.fi/codelist-api/api/v1/coderegistries/{registry}"
-                   f"/codeschemes/{scheme}/codes/?format=json&pageSize=1000")
-            _codelists[key] = {c["codeValue"]: c["prefLabel"].get("fi") for c in get_json(api)["results"]}
-        except Exception as e:  # labels are optional
-            print("  codelist failed", key, e)
-            _codelists[key] = {}
-    return _codelists[key].get(value, value)
-
-
-def pxweb(path, query):
-    """POST a PxWeb query and return (dims, list of (record, value))."""
-    js = get_json(f"https://pxdata.stat.fi/PxWeb/api/v1/fi/{path}",
-                  {"query": query, "response": {"format": "json-stat2"}})
+def pxweb(path, query, lang="en"):
+    """POST a PxWeb query; returns (labels per dimension, list of (record, value), categories)."""
+    js = get_json(f"{PXWEB}/{lang}/{path}", {"query": query, "response": {"format": "json-stat2"}})
     dims, sizes = js["id"], js["size"]
     cats = [list(js["dimension"][d]["category"]["index"].keys()) for d in dims]
     labels = {d: js["dimension"][d]["category"].get("label", {}) for d in dims}
@@ -175,7 +228,7 @@ PAAVO_FIELDS = ["he_vakiy", "he_kika", "hr_mtu", "te_taly", "te_takk", "te_as_va
 
 def fetch_paavo(postal_codes):
     path = "Postinumeroalueittainen_avoin_tieto/uusin/12f7.px"
-    meta = get_json(f"https://pxdata.stat.fi/PxWeb/api/v1/fi/{path}")
+    meta = get_json(f"{PXWEB}/en/{path}")
     var = {v["code"]: v for v in meta["variables"]}
     pc_code = next(c for c in var if c.startswith("postinumeroalue"))
     labels = dict(zip(var["contentscode"]["values"], var["contentscode"]["valueTexts"]))
@@ -186,7 +239,7 @@ def fetch_paavo(postal_codes):
         {"code": "timeperiod_y", "selection": {"filter": "item", "values": [year]}},
         {"code": "contentscode", "selection": {"filter": "item", "values": PAAVO_FIELDS}},
     ])
-    names = dict(zip(var[pc_code]["values"], var[pc_code]["valueTexts"]))
+    names = dict(zip(var[pc_code]["values"], var[pc_code]["valueTexts"]))  # place names, not translated
     by_postal = {}
     for rec, v in rows:
         pc = rec[pc_code]
@@ -194,23 +247,32 @@ def fetch_paavo(postal_codes):
     return {"year": year, "labels": {k: labels[k] for k in PAAVO_FIELDS}, "byPostal": by_postal}
 
 
-def fetch_events():
+def fetch_events(max_pages=20):
+    """Upcoming events in the BBOX, all pages, recurring sub-events collapsed into their series."""
     url = "https://api.hel.fi/linkedevents/v1/event/?" + urllib.parse.urlencode({
-        "bbox": ",".join(map(str, BBOX)), "start": "today", "page_size": 100, "include": "location", "sort": "start_time"})
-    events = []
-    for e in get_json(url)["data"]:
-        loc = e.get("location") or {}
-        pos = loc.get("position")
-        if not pos:
-            continue
-        name = e.get("name") or {}
-        events.append({
-            "name": name.get("fi") or name.get("en") or "",
-            "start": e.get("start_time"),
-            "place": (loc.get("name") or {}).get("fi"),
-            "lon": pos["coordinates"][0], "lat": pos["coordinates"][1],
-            "url": f"https://tapahtumat.hel.fi/fi/events/{e['id']}",
-        })
+        "bbox": ",".join(map(str, BBOX)), "start": "today", "page_size": 100, "include": "location",
+        "sort": "start_time", "hide_recurring_children": "true"})
+    events, seen = [], set()
+    for _ in range(max_pages):
+        page = get_json(url)
+        for e in page["data"]:
+            loc = e.get("location") or {}
+            pos = loc.get("position")
+            if not pos or e["id"] in seen:
+                continue
+            seen.add(e["id"])
+            name, place = e.get("name") or {}, loc.get("name") or {}
+            events.append({
+                "name": name.get("en") or english(name.get("fi") or name.get("sv")),
+                "start": e.get("start_time"),
+                "end": e.get("end_time"),
+                "place": place.get("en") or place.get("fi"),
+                "lon": pos["coordinates"][0], "lat": pos["coordinates"][1],
+                "url": f"https://tapahtumat.hel.fi/en/events/{e['id']}",
+            })
+        url = page["meta"].get("next")
+        if not url:
+            break
     return events
 
 
@@ -220,8 +282,45 @@ def d10(s):
     return s[:10] if s else None
 
 
-def build(footprints, ryhti, addresses, permits, protected, plans):
+def parse_plan_approval(text):
+    """'12.09.2018' or 'kylk 14.5.2024' -> ('2018-09-12', None) / ('2024-05-14', 'kylk'); 'Vireillä' -> (None, None)."""
+    m = re.match(r"^\s*([^\d]*?)\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$", text or "")
+    if not m:
+        return None, None
+    body, dd, mm, yyyy = m.groups()
+    return f"{yyyy}-{int(mm):02d}-{int(dd):02d}", body or None
+
+
+def prune(obj):
+    """Drop None values and empty lists/dicts to keep the data file small."""
+    if isinstance(obj, dict):
+        return {k: prune(v) for k, v in obj.items() if v is not None and v != [] and v != {}}
+    if isinstance(obj, list):
+        return [prune(v) for v in obj]
+    return obj
+
+
+def plot_key(property_id):
+    """'091-017-0105-0006' or '09101701050006' -> '09101701050006'."""
+    return "".join(ch for ch in (property_id or "") if ch.isdigit()) or None
+
+
+def plot_info(p):
+    use = p.get("kayttotarkoitusluokka") or ""
+    code = p.get("kayttotarkoitusluokka_koodi")
+    return prune({
+        "id": p.get("kaavayksikkotunnus"),
+        "plan": p.get("kaavatunnus"),
+        "useCode": code,
+        "use": english(use[len(code):].strip() if code and use.startswith(code) else use) or None,
+        "buildingRights": p.get("rakennusoikeus"),
+        "areaM2": p.get("rekisteriala"),
+    })
+
+
+def build(footprints, ryhti, addresses, permits, protected, plans, plots):
     ryhti_by_vtj = {f["properties"]["permanent_building_identifier"]: f for f in ryhti}
+    ryhti_points = [(k, *f["geometry"]["coordinates"]) for k, f in ryhti_by_vtj.items()]
     addr_by_key = {}
     for a in addresses:
         p = a["properties"]
@@ -231,11 +330,17 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
     for f in permits:
         p = f["properties"]
         permits_by_vtj.setdefault(p["permanent_building_identifier"], []).append({
-            "action": code_label(p["construction_action_type"]),
-            "actionCode": (p["construction_action_type"] or "").split("/")[-1],
-            "status": code_label(p["status_of_construction_action"]),
             "decision": d10(p["decision_date"]), "start": d10(p["start_date"]),
-            "completed": d10(p["completion_date"]), "permitId": p["permanent_permit_identifier"],
+            "completed": d10(p["completion_date"]), "expires": d10(p.get("expiry_date")),
+            "extensionDecision": p.get("construction_to_be_completed_by_extension"),
+            "permitId": p["permanent_permit_identifier"], "dvvId": p.get("dvv_permit_identifier"),
+            # Building data as stated in the permit
+            "storeys": p.get("number_of_storeys") or None,
+            "apartments": p.get("apartment_count") or None,
+            "grossFloorArea": p.get("gross_floor_area") or None,
+            "floorArea": p.get("floor_area") or None,
+            "totalArea": p.get("total_area") or None,
+            "volume": p.get("volume") or None,
         })
 
     protected_by_ratu = {}
@@ -245,6 +350,14 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
             protected_by_ratu[str(p["pys_raknro"])] = {"plan": p.get("kaava"), "mark": p.get("s_merk"),
                                                        "since": d10(p.get("voimaantulo_pvm"))}
 
+    plan_items = [(bounds_of(pl["geometry"]), pl) for pl in plans if polygons_of(pl["geometry"])]
+
+    # Plan units (plots) currently in force: by plot id, plus a spatial fallback
+    plots_valid = [pl for pl in plots if pl["properties"].get("luokka") == "Voimassa" and polygons_of(pl["geometry"])]
+    plot_by_id = {pl["properties"]["kaavayksikkotunnus"]: pl["properties"] for pl in plots_valid}
+    plot_items = [(bounds_of(pl["geometry"]), pl) for pl in plots_valid]
+    plans_used = {}  # plan id -> details + boundary (stored once, buildings reference the id)
+
     stats = {"register": 0, "spatial": 0, "verified": 0, "mismatch": 0, "context": 0}
 
     # 1) Decide which building (VTJ-PRT) each footprint belongs to
@@ -253,7 +366,9 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
         h = f["properties"]
         geom = f["geometry"]
         vtj = h.get("vtj_prt") or h.get("c_vtj_prt")
-        inside = [k for k, r in ryhti_by_vtj.items() if point_in_geom(*r["geometry"]["coordinates"], geom)]
+        x0, y0, x1, y1 = bounds_of(geom)
+        inside = [k for k, x, y in ryhti_points
+                  if x0 <= x <= x1 and y0 <= y <= y1 and point_in_geom(x, y, geom)]
         if vtj:
             stats["register"] += 1
             if vtj in inside:
@@ -278,7 +393,8 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
         r = ryhti_by_vtj.get(vtj)
         rp = r["properties"] if r else {}
         anchor = next((r["geometry"]["coordinates"] for p in parts
-                       if r and point_in_geom(*r["geometry"]["coordinates"], p["geometry"])), None)             or centroid(parts[0]["geometry"])
+                       if r and point_in_geom(*r["geometry"]["coordinates"], p["geometry"])), None) \
+            or centroid(parts[0]["geometry"])
         if not in_bbox(*anchor):
             continue
         # The register part that carries the attributes (largest floor area wins)
@@ -292,16 +408,42 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
         else:
             address, postal = None, None
         ratu = str(h.get("ratu") or "")
-        plan_hits = [pl["properties"] for pl in plans if point_in_geom(anchor[0], anchor[1], pl["geometry"])]
+
+        plans_here = []
+        for (px0, py0, px1, py1), pl in plan_items:
+            if px0 <= anchor[0] <= px1 and py0 <= anchor[1] <= py1 and point_in_geom(anchor[0], anchor[1], pl["geometry"]):
+                p = pl["properties"]
+                pid = p.get("kaavatunnus")
+                if pid not in plans_used:
+                    approved, approved_by = parse_plan_approval(p.get("hyvaksymispvm"))
+                    plans_used[pid] = prune({
+                        "id": pid, "status": english(p.get("luokka")),
+                        "approved": approved, "approvedBy": english(approved_by),
+                        "confirmed": d10(p.get("vahvistamispvm")),
+                        "legallyValid": d10(p.get("lainvoimaisuuspvm")),
+                        "inForce": d10(p.get("voimaantulopvm")),
+                        "areaM2": round(p["pintaala"]) if p.get("pintaala") else None,
+                        "updated": d10(p.get("muokkauspvm")),
+                        "geometry": pl["geometry"],  # boundary as published, drawn when the plan is opened
+                    })
+                plans_here.append(pid)
+
+        # Plot zoning: the plan unit whose id equals the building's property id, else the plot under the building
+        property_id = h.get("c_kiinteistotunnus") or rp.get("property_identifier")
+        plot = plot_by_id.get(plot_key(property_id))
+        if not plot:
+            hits = [pl["properties"] for (x0, y0, x1, y1), pl in plot_items
+                    if x0 <= anchor[0] <= x1 and y0 <= anchor[1] <= y1 and point_in_geom(anchor[0], anchor[1], pl["geometry"])]
+            plot = min(hits, key=lambda q: q.get("rekisteriala") or 1e12) if hits else None
 
         props = {
             "id": vtj,
             "vtj": vtj,
+            "footprintId": None,  # set per part below
             "address": address,
             "otherAddresses": [a["address_fin"] for a in ryhti_addr if a["address_fin"] != address][:4],
             "postalCode": postal or (ryhti_addr[0]["postal_code"] if ryhti_addr else None),
-            "type": h.get("tyyppi"),
-            "purpose": code_label(rp.get("main_purpose")),
+            "class": building_class(h.get("c_rakennusluokka"), h.get("tyyppi")),
             "completed": d10(h.get("c_valmpvm")) or d10(rp.get("completion_date")),
             "storeys": h.get("i_kerrlkm") or rp.get("number_of_storeys"),
             "apartments": h.get("i_asuinhuoneistojen_lkm") or rp.get("apartment_count") or 0,
@@ -310,79 +452,95 @@ def build(footprints, ryhti, addresses, permits, protected, plans):
             "volume": h.get("i_raktilav") or rp.get("volume"),
             "elevator": h.get("c_hissi") == "x" if h.get("c_hissi") is not None else None,
             "propertyId": h.get("c_kiinteistotunnus") or rp.get("property_identifier"),
-            "heating": code_label(rp.get("heating_method")),
-            "energy": code_label(rp.get("heating_energy_source")),
-            "structure": code_label(rp.get("material_of_load_bearing_structures")),
-            "facade": code_label(rp.get("facade_material")),
+            "energy": helsinki_code("RA_LAMMONLAHDE", h.get("c_poltaine")),
+            "structure": helsinki_code("RA_KANTRAKAINE", h.get("c_rakeaine")),
+            "facade": helsinki_code("RA_JULKISIVUMAT", h.get("c_julkisivu")),
             "protection": protected_by_ratu.get(ratu),
-            "plans": sorted(({"id": p.get("kaavatunnus"), "status": p.get("luokka"),
-                              "approved": p.get("hyvaksymispvm"), "inForce": d10(p.get("voimaantulopvm"))}
-                             for p in plan_hits), key=lambda x: x["inForce"] or "9999", reverse=True),
+            "plot": plot_info(plot) if plot else None,
+            "plans": sorted(plans_here, key=lambda i: plans_used[i].get("inForce") or "9999", reverse=True),
             "history": sorted(permits_by_vtj.get(vtj, []), key=lambda x: x["decision"] or x["start"] or "", reverse=True),
-            "parts": len(parts),
             "verified": vtj in verified,
-            "match": "register" if (h.get("vtj_prt") or h.get("c_vtj_prt")) else "spatial",
         }
         for part in parts:
             features.append({"type": "Feature", "geometry": part["geometry"],
-                             "properties": {**props, "footprintId": part["properties"]["id"]}})
+                             "properties": prune({**props, "footprintId": part["properties"]["id"]})})
 
     # 3) Footprints that cannot be tied to any building record: drawn as non-clickable context
     context_feats = []
     for f in context:
         if in_bbox(*centroid(f["geometry"])):
             stats["context"] += 1
-            context_feats.append({"type": "Feature", "geometry": f["geometry"],
-                                  "properties": {"type": f["properties"].get("tyyppi")}})
-    return features, context_feats, stats
+            context_feats.append({"type": "Feature", "geometry": f["geometry"], "properties": {}})
+    return features, context_feats, plans_used, stats
 
 
 def main():
+    started = time.time()
     print("BBOX", BBOX)
-    steps = [
-        ("footprints", lambda: fetch_wfs("Rakennukset_alue_rekisteritiedot")),
-        ("protected", lambda: fetch_wfs("Asemakaavoissa_suojellut_rakennukset_alue")),
-        ("plans in force", lambda: fetch_wfs("Kaavahakemisto_alue_kaava_voimassa")),
-        ("plans pending", lambda: fetch_wfs("Kaavahakemisto_alue_kaava_vireilla")),
-        ("ryhti buildings", lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_building")),
-        ("ryhti addresses", lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_address")),
-        ("ryhti permits", lambda: fetch_ogc("ryhti_permit/ogc/features/v1/collections/open_permit_building")),
-    ]
-    got = {}
-    for name, fn in steps:
-        got[name] = fn()
-        print(f"  {name:16} {len(got[name])}")
+    steps = {
+        "footprints": lambda: fetch_wfs("Rakennukset_alue_rekisteritiedot"),
+        "protected": lambda: fetch_wfs("Asemakaavoissa_suojellut_rakennukset_alue"),
+        "plans in force": lambda: fetch_wfs("Kaavahakemisto_alue_kaava_voimassa"),
+        "plans pending": lambda: fetch_wfs("Kaavahakemisto_alue_kaava_vireilla"),
+        "plan units": lambda: fetch_wfs("Kaavayksikot"),
+        "ryhti buildings": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_building"),
+        "ryhti addresses": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_address"),
+        "ryhti permits": lambda: fetch_ogc("ryhti_permit/ogc/features/v1/collections/open_permit_building"),
+        "events": fetch_events,
+    }
+    # All sources and code lists are independent: fetch them in parallel
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        code_jobs = [pool.submit(load_building_classification)]
+        futures = {name: pool.submit(fn) for name, fn in steps.items()}
+        got = {}
+        for name, fut in futures.items():
+            try:
+                got[name] = fut.result()
+            except Exception as e:
+                if name != "events":  # events are optional, everything else is required
+                    raise
+                print("  events failed:", e)
+                got[name] = []
+            print(f"  {name:16} {len(got[name])}")
+        for job in code_jobs:
+            job.result()
 
-    features, context, stats = build(got["footprints"], got["ryhti buildings"], got["ryhti addresses"],
+    features, context, plans, stats = build(got["footprints"], got["ryhti buildings"], got["ryhti addresses"],
                                      got["ryhti permits"], got["protected"],
-                                     got["plans in force"] + got["plans pending"])
-    print("  join:", stats, "-> buildings", len(features))
+                                     got["plans in force"] + got["plans pending"], got["plan units"])
+    print("  join:", stats, "-> footprints", len(features))
 
-    postal = sorted({f["properties"]["postalCode"] for f in features if f["properties"]["postalCode"]})
+    postal = sorted({f["properties"]["postalCode"] for f in features if f["properties"].get("postalCode")})
     print("  postal codes", postal)
-    prices = fetch_prices(postal)
-    paavo = fetch_paavo(postal)
-    try:
-        events = fetch_events()
-    except Exception as e:
-        print("  events failed:", e)
-        events = []
-    print("  events", len(events))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        prices_job, paavo_job = pool.submit(fetch_prices, postal), pool.submit(fetch_paavo, postal)
+        prices, paavo = prices_job.result(), paavo_job.result()
 
     data = {
         "generated": date.today().isoformat(),
         "bbox": BBOX,
         "buildings": {"type": "FeatureCollection", "features": features},
         "context": {"type": "FeatureCollection", "features": context},
+        "plans": plans,
         "prices": prices,
         "paavo": paavo,
-        "events": events,
+        "events": prune(got["events"]),
         "joinStats": stats,
     }
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text("window.PASILA_DATA = " + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n",
                    encoding="utf-8")
-    print(f"Wrote {OUT} ({OUT.stat().st_size // 1024} KB)")
+    print(f"Wrote {OUT} ({OUT.stat().st_size // 1024} KB) in {time.time() - started:.0f}s")
+
+    # Cache-busting: point index.html at this exact dataset version
+    html = INDEX.read_text(encoding="utf-8")
+    INDEX.write_text(re.sub(r'data/pasila-data\.js(\?v=[^"]*)?"', f'data/pasila-data.js?v={int(started)}"', html),
+                     encoding="utf-8")
+    if UNTRANSLATED:
+        print(f"No official English for {len(UNTRANSLATED)} values "
+              f"({sum(map(len, UNTRANSLATED))} chars), shown in Finnish:")
+        for s in sorted(UNTRANSLATED):
+            print("   ", s)
 
 
 if __name__ == "__main__":

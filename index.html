@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=5.0">
+  <link rel="stylesheet" href="style.css?v=6.2">
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -57,17 +57,10 @@
     </div>
   </header>
 
-  <!-- Filter & Stats Bar -->
+  <!-- Area Bar -->
   <div class="filter-bar">
-    <div class="filter-pills">
-      <button class="filter-pill active" data-filter="all">All buildings (<span id="countAll">0</span>)</button>
-      <button class="filter-pill" data-filter="residential">Residential (<span id="countResidential">0</span>)</button>
-      <button class="filter-pill" data-filter="recent">Built 2010 or later (<span id="countRecent">0</span>)</button>
-      <button class="filter-pill" data-filter="renovated">Alteration / extension permits (<span id="countRenovated">0</span>)</button>
-      <button class="filter-pill" data-filter="protected">Protected (<span id="countProtected">0</span>)</button>
-    </div>
     <div class="area-indicator">
-      <i class="fa-solid fa-location-dot"></i> Data area: <strong>Länsi-, Keski- &amp; Itä-Pasila (BBOX)</strong>
+      <i class="fa-solid fa-location-dot"></i> <strong>Pasila, Helsinki</strong>
     </div>
   </div>
 
@@ -152,9 +145,9 @@
           <p class="chart-footnote">Source: Statistics Finland, table 13mu – €/m² of old dwellings in housing companies by postal code, yearly. Area-level prices, not prices of this building.</p>
         </section>
 
-        <!-- TAB 5: Zoning plans & events -->
+        <!-- TAB 5: Detailed plans & events -->
         <section id="tabNews" class="tab-body">
-          <h3 class="section-title"><i class="fa-solid fa-bullhorn"></i> Zoning plans &amp; events around the building</h3>
+          <h3 class="section-title"><i class="fa-solid fa-bullhorn"></i> Detailed plans &amp; events around the building</h3>
           <div class="news-list" id="newsList"></div>
         </section>
       </div>
@@ -178,22 +171,28 @@
         <div class="license-item">
           <div class="license-badge cc">CC BY 4.0</div>
           <div class="license-info">
-            <h4>Buildings, protection, zoning plans, base maps – City of Helsinki</h4>
-            <p>WFS/WMS kartta.hel.fi: <em>Rakennukset_alue_rekisteritiedot</em>, <em>Asemakaavoissa_suojellut_rakennukset</em>, <em>Kaavahakemisto</em>, <em>Ortoilmakuva 2025</em>, <em>Kantakartta</em>. © Helsingin kaupunki, CC BY 4.0 (<a href="https://hri.fi/data/fi/dataset/helsingin-rakennukset" target="_blank">HRI</a>). Footprint geometries are displayed exactly as published.</p>
+            <h4>Buildings, protection, detailed plans, base maps – City of Helsinki</h4>
+            <p>WFS/WMS kartta.hel.fi: <em>Rakennukset_alue_rekisteritiedot</em>, <em>Asemakaavoissa_suojellut_rakennukset</em>, <em>Kaavahakemisto</em>, <em>Kaavayksikot</em>, <em>Ortoilmakuva 2025</em>, <em>Kantakartta</em>. © Helsingin kaupunki, CC BY 4.0 (HRI:
+            <a href="https://hri.fi/data/fi/dataset/helsingin-rakennukset" target="_blank">buildings</a>,
+            <a href="https://hri.fi/data/fi/dataset/asemakaavoilla-suojellut-rakennukset-ja-alueet-helsingissa" target="_blank">protected buildings</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-asemakaavahakemistokartta-asemakaavahakemisto" target="_blank">plan index</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-kaavayksikot" target="_blank">plan units</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-ortoilmakuvat" target="_blank">aerial photos</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-kantakartta" target="_blank">base map</a>). Footprint geometries are displayed exactly as published. Heating energy source, load-bearing material and facade labels come from the dataset's <a href="https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf" target="_blank">code explanations</a>.</p>
           </div>
         </div>
         <div class="license-item">
           <div class="license-badge cc">CC BY 4.0</div>
           <div class="license-info">
             <h4>Ryhti – buildings, addresses, building permits</h4>
-            <p>OGC API Features <em>open_building</em>, <em>open_address</em>, <em>open_permit_building</em>. Lähde: Syke, Ryhti. Syke open data is licensed under <a href="https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut" target="_blank">CC BY 4.0</a>.</p>
+            <p>OGC API Features <em>open_building</em>, <em>open_address</em>, <em>open_permit_building</em>. Lähde: Syke, Ryhti. Open content is CC BY 4.0 (<a href="https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot" target="_blank">Syke metadata</a>, <a href="https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut" target="_blank">terms</a>).</p>
           </div>
         </div>
         <div class="license-item">
           <div class="license-badge stat">STAT FIN</div>
           <div class="license-info">
-            <h4>Prices of old dwellings (13mu) &amp; Paavo postal code statistics</h4>
-            <p>PxWeb API. © Tilastokeskus, CC BY 4.0.</p>
+            <h4>Prices of old dwellings (13mu), Paavo postal code statistics, Classification of Buildings 2018</h4>
+            <p>PxWeb API and classifications API. © Tilastokeskus, <a href="https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces" target="_blank">CC BY 4.0</a>.</p>
           </div>
         </div>
         <div class="license-item">
@@ -226,7 +225,7 @@
 
   <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="data/pasila-data.js"></script>
-  <script src="app.js?v=5.0"></script>
+  <script src="data/pasila-data.js?v=1792265757"></script>
+  <script src="app.js?v=7.0"></script>
 </body>
 </html>

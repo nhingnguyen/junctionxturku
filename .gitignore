@@ -1,2 +1,8 @@
+node_modules
+
+credentials/
+token.json
+.env
+
 RYHTI_API_TEST_REPORT.md
 .review

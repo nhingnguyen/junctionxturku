@@ -1,11 +1,12 @@
 /**
  * Pasila Urban & Real Estate Intelligence
  * Data: window.PASILA_DATA built by scripts/build_data.py, official open data only (CC BY 4.0):
- *   - Footprints, register, protection, zoning plans: City of Helsinki (kartta.hel.fi)
+ *   - Footprints, register, protection, detailed plans: City of Helsinki (kartta.hel.fi)
  *   - Buildings, addresses, permits:                  Ryhti / Syke
  *   - Prices, postal-area statistics (Paavo):         Statistics Finland
  *   - Events:                                         Linked Events, City of Helsinki
- * The UI is in English; data values are shown exactly as published (Finnish).
+ * English only: official English labels come from the sources (Statistics Finland,
+ * Linked Events); values without an official translation are shown as published (Finnish).
  * Base maps and footprint geometries are used unmodified: everything we add is an overlay.
  */
 
@@ -13,10 +14,7 @@ const DATA = window.PASILA_DATA;
 const FEATURES = DATA.buildings.features;
 const BUILDINGS = [...new Map(FEATURES.map(f => [f.properties.id, f.properties])).values()];
 
-// Ryhti construction_action_type codes 02 Laajentaminen, 03 Uudelleen rakentamiseen verrattava muutostyö, 04 Muu muutostyö
-const RENOVATION_CODES = ['02', '03', '04'];
-
-// Paavo fields shown in the "Area" tab; labels come from the API (Finnish)
+// Paavo fields shown in the "Area" tab; labels come from the English PxWeb API
 const PAAVO_FIELDS = ['he_vakiy', 'he_kika', 'hr_mtu', 'te_taly', 'te_takk', 'te_as_valj', 'te_yks',
                       'te_laps', 'te_omis_as', 'te_vuok_as', 'ra_asunn', 'ra_as_kpa', 'ra_kt_as', 'ra_raky'];
 
@@ -24,6 +22,8 @@ const STYLE = {
   res:     { color: '#0369a1', fillColor: '#38bdf8', fillOpacity: 0.4,  weight: 1.2 },
   other:   { color: '#475569', fillColor: '#94a3b8', fillOpacity: 0.3,  weight: 1 },
   context: { color: '#64748b', fillColor: '#64748b', fillOpacity: 0.12, weight: 0.5, dashArray: '2 2' },
+  planHalo:{ color: '#ffffff', weight: 7, opacity: 0.9, fill: false },
+  plan:    { color: '#ff1f8f', fillColor: '#ff1f8f', fillOpacity: 0.12, weight: 3.5 },
   active:  { color: '#facc15', fillColor: '#facc15', fillOpacity: 0.7,  weight: 3 }
 };
 
@@ -31,13 +31,15 @@ let map = null;
 let buildingLayer = null;
 let activeId = null;
 let priceChart = null;
-let currentFilter = 'all';
+let layerIndex = new Map();   // building id -> its footprint layers
+let selectedPostal = null;
+let chartPostal;              // postal code the price chart was last drawn for
+let planLayer = null;         // outline of the detailed plan opened in the Plans tab
 
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
   renderBuildings();
   setupEventListeners();
-  updateFilterCounts();
   document.getElementById('dataDate').textContent = DATA.generated;
   document.getElementById('mapLoader').classList.add('hidden');
 });
@@ -48,9 +50,16 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<'
 const fmtDate = (iso) => iso ? iso.split('-').reverse().join('.') : '—';
 const fmtNum = (n) => (n || n === 0) ? Number(n).toLocaleString('fi-FI') : '—';
 const isResidential = (p) => p.apartments > 0;
-const isRenovated = (p) => p.history.some(h => RENOVATION_CODES.includes(h.actionCode));
 const completedYear = (p) => p.completed ? Number(p.completed.slice(0, 4)) : null;
-const titleOf = (p) => p.address || p.type || 'Building without address';
+const titleOf = (p) => p.address || p.class || 'Building without address';
+const fmtArea = (m2) => m2 >= 10000 ? `${fmtNum(Math.round(m2 / 100) / 100)} ha` : `${fmtNum(m2)} m²`;
+
+// Key/value grid for an expanded item; empty values are skipped
+function detailGrid(rows) {
+  return `<div class="detail-grid">${rows
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `<span>${esc(k)}</span><strong>${esc(v)}</strong>`).join('')}</div>`;
+}
 
 function distanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000, toRad = Math.PI / 180;
@@ -129,18 +138,10 @@ function addLegend() {
       <div><span class="swatch" style="background:${STYLE.res.fillColor}"></span> Residential</div>
       <div><span class="swatch" style="background:${STYLE.other.fillColor}"></span> Other building</div>
       <div><span class="swatch context"></span> Minor structure (no record)</div>
-      <div><span class="swatch bbox"></span> Data area (BBOX)</div>`;
+      <div><span class="swatch bbox"></span> Data area</div>`;
     return div;
   };
   legend.addTo(map);
-}
-
-function filterFn(p) {
-  if (currentFilter === 'residential') return isResidential(p);
-  if (currentFilter === 'recent') return (completedYear(p) || 0) >= 2010;
-  if (currentFilter === 'renovated') return isRenovated(p);
-  if (currentFilter === 'protected') return !!p.protection;
-  return true;
 }
 
 // Draw the surveyed footprints. Every polygon carries its own feature data,
@@ -148,16 +149,18 @@ function filterFn(p) {
 function renderBuildings() {
   if (buildingLayer) map.removeLayer(buildingLayer);
   activeId = null;
+  layerIndex = new Map();
 
   buildingLayer = L.geoJSON(DATA.buildings, {
-    filter: (f) => filterFn(f.properties),
     style: (f) => isResidential(f.properties) ? STYLE.res : STYLE.other,
     smoothFactor: 0, // keep every surveyed vertex; Leaflet simplifies outlines by default
     onEachFeature: (feature, layer) => {
       const p = feature.properties;
+      if (!layerIndex.has(p.id)) layerIndex.set(p.id, []);
+      layerIndex.get(p.id).push(layer);
       layer.bindTooltip(`
         <strong>${esc(titleOf(p))}</strong><br>
-        <span>${completedYear(p) || '?'} • ${p.apartments ? p.apartments + ' apartments' : esc(p.type || '')}</span>
+        <span>${completedYear(p) || '?'} • ${p.apartments ? p.apartments + ' apartments' : esc(p.class || '')}</span>
       `, { sticky: true, className: 'building-tooltip' });
 
       layer.on('click', (e) => {
@@ -172,7 +175,7 @@ function renderBuildings() {
 
 // A building can consist of several footprints; all of them share the same id
 function layersOf(id) {
-  return buildingLayer.getLayers().filter(l => l.feature.properties.id === id);
+  return layerIndex.get(id) || [];
 }
 
 // ---------- Selection & sidebar ----------
@@ -183,6 +186,7 @@ function selectBuilding(id) {
   const p = layers[0].feature.properties;
 
   if (activeId) layersOf(activeId).forEach(l => buildingLayer.resetStyle(l));
+  clearPlan();
   activeId = id;
   layers.forEach(l => { l.setStyle(STYLE.active); l.bringToFront(); });
 
@@ -198,8 +202,8 @@ function selectBuilding(id) {
   document.getElementById('buildingTitle').textContent = titleOf(p);
   document.getElementById('buildingPostal').innerHTML =
     `<i class="fa-solid fa-map-pin"></i> ${esc(p.postalCode || '—')} Helsinki` +
-    (p.otherAddresses.length ? ` <span class="muted">• also ${esc(p.otherAddresses.join(', '))}</span>` : '');
-  document.getElementById('heroPurpose').textContent = p.purpose || p.type || '—';
+    (p.otherAddresses ? ` <span class="muted">• also ${esc(p.otherAddresses.join(', '))}</span>` : '');
+  document.getElementById('heroPurpose').textContent = p.class || '—';
   document.getElementById('heroYear').textContent = `Completed ${completedYear(p) || '?'}`;
   document.getElementById('heroApts').textContent = `${p.apartments || 0} apartments`;
   document.getElementById('valVtjId').textContent = p.vtj || '—';
@@ -208,7 +212,9 @@ function selectBuilding(id) {
   renderSpecs(p);
   renderArea(p.postalCode);
   renderTimeline(p);
-  renderPriceChart(p.postalCode);
+  selectedPostal = p.postalCode;
+  chartPostal = undefined;
+  refreshPriceChart();
   renderPlansAndEvents(p, bounds.getCenter());
 
   document.getElementById('buildingSidebar').classList.add('open');
@@ -222,13 +228,12 @@ function renderSpecs(p) {
     ['Floor area (kerrosala)', p.floorArea ? `${fmtNum(p.floorArea)} m²` : '—'],
     ['Total area', p.totalArea ? `${fmtNum(p.totalArea)} m²` : '—'],
     ['Volume', p.volume ? `${fmtNum(p.volume)} m³` : '—'],
-    ['Building type', p.type || '—'],
-    ['Heating method', p.heating || '—'],
+    ['Building class', p.class || '—'],
     ['Heating energy source', p.energy || '—'],
-    ['Load-bearing structure', p.structure || '—'],
+    ['Load-bearing material', p.structure || '—'],
     ['Facade material', p.facade || '—'],
-    ['Elevator', p.elevator === null ? '—' : p.elevator ? 'Yes' : 'No'],
-    ['Protected in zoning plan', p.protection ? `${p.protection.mark || ''} (asemakaava ${p.protection.plan})` : 'No']
+    ['Elevator', p.elevator == null ? '—' : p.elevator ? 'Yes' : 'No'],
+    ['Protected in detailed plan', p.protection ? `${p.protection.mark || ''} (plan ${p.protection.plan})` : 'No']
   ];
   document.getElementById('specsGrid').innerHTML = rows.map(([k, v]) => `
     <div class="spec-card">
@@ -269,35 +274,85 @@ function renderArea(postalCode) {
     <p class="chart-footnote">Source: Statistics Finland, Paavo – open data by postal code area (CC BY 4.0).</p>`;
 }
 
+// Value recorded in the permit, with today's register value when it differs
+function withNow(permitValue, nowValue, fmt = (v) => v) {
+  if (permitValue == null) return null;
+  const changed = nowValue != null && String(nowValue) !== String(permitValue);
+  return `${fmt(permitValue)}${changed ? `  →  now ${fmt(nowValue)}` : ''}`;
+}
+
+// Permit progress derived from the dates Ryhti publishes
+function permitState(h) {
+  if (h.completed) return 'Completed';
+  if (h.start) return 'Under construction';
+  if (h.expires && h.expires < DATA.generated) return 'Not started, permit expired';
+  return 'Permit granted, not started';
+}
+
+function permitDetails(h, p) {
+  const m2 = (v) => `${fmtNum(v)} m²`;
+  return `
+    <h5 class="detail-heading">Permit</h5>
+    ${detailGrid([
+      ['Progress (from dates)', permitState(h)],
+      ['Decision', h.decision && fmtDate(h.decision)],
+      ['Construction started', h.start && fmtDate(h.start)],
+      ['Completed', h.completed && fmtDate(h.completed)],
+      ['Permit expires', h.expires && fmtDate(h.expires)],
+      ['Extension decision', h.extensionDecision],
+      ['Permit ID', h.permitId],
+      ['DVV permit ID', h.dvvId]
+    ])}
+    <h5 class="detail-heading">Building data recorded with the permit</h5>
+    ${detailGrid([
+      ['Storeys', withNow(h.storeys, p.storeys)],
+      ['Apartments', withNow(h.apartments, p.apartments || null)],
+      ['Gross floor area', withNow(h.grossFloorArea, p.floorArea, m2)],
+      ['Total area', withNow(h.totalArea, p.totalArea, m2)],
+      ['Volume', withNow(h.volume, p.volume, (v) => `${fmtNum(v)} m³`)]
+    ])}
+    <p class="muted">Open data has the permit's dates and the building data stated in it. The type of work,
+    its description, drawings and conditions are only in Ryhti's licensed (paid) interface.</p>`;
+}
+
 function renderTimeline(p) {
   const container = document.getElementById('permitTimeline');
-  const items = p.history.map(h => ({
+  const history = p.history || [];
+  const items = history.map(h => ({
     date: h.completed || h.start || h.decision,
-    title: h.action || 'Rakentamislupa',
+    title: `Building permit ${h.permitId || ''}`.trim(),
     desc: [
-      h.status,
+      permitState(h),
       h.decision && `Decision ${fmtDate(h.decision)}`,
       h.start && `Started ${fmtDate(h.start)}`,
       h.completed && `Completed ${fmtDate(h.completed)}`
     ].filter(Boolean).join(' • '),
-    permit: h.permitId,
-    renovation: RENOVATION_CODES.includes(h.actionCode)
+    details: permitDetails(h, p)
   }));
 
   // Buildings older than the digital permit register still have a completion date
-  if (p.completed && !p.history.some(h => h.actionCode === '01')) {
-    items.push({ date: p.completed, title: 'Valmistunut', desc: 'Completion date from the Helsinki building register', permit: null });
+  if (p.completed && !history.some(h => h.completed === p.completed)) {
+    items.push({ date: p.completed, title: 'Completed', desc: 'Completion date from the Helsinki building register', permit: null });
   }
 
   container.innerHTML = items.length ? items.map(r => `
-    <div class="timeline-item ${r.renovation ? 'is-renovation' : ''}">
+    <div class="timeline-item">
       <div class="timeline-dot"></div>
-      <div class="timeline-date">${fmtDate(r.date)}</div>
-      <div class="timeline-title">${esc(r.title)}</div>
-      <div class="timeline-desc">${esc(r.desc)}</div>
-      ${r.permit ? `<div class="timeline-permit-id">Permit ID: ${esc(r.permit)}</div>` : ''}
+      ${r.details ? '<button class="item-toggle" aria-expanded="false">' : '<div>'}
+        <div class="timeline-date">${fmtDate(r.date)}</div>
+        <div class="timeline-title">${esc(r.title)}${r.details ? '<i class="fa-solid fa-chevron-down chevron"></i>' : ''}</div>
+        <div class="timeline-desc">${esc(r.desc)}</div>
+      ${r.details ? '</button>' : '</div>'}
+      ${r.details ? `<div class="item-details" hidden>${r.details}</div>` : ''}
     </div>`).join('')
     : `<p class="muted">No permits recorded in Ryhti for this building.</p>`;
+}
+
+// The chart is only drawn while the Prices tab is visible (and redrawn only when the postal code changes)
+function refreshPriceChart() {
+  if (!document.getElementById('tabPrice').classList.contains('active') || chartPostal === selectedPostal) return;
+  chartPostal = selectedPostal;
+  renderPriceChart(selectedPostal);
 }
 
 function renderPriceChart(postalCode) {
@@ -372,11 +427,40 @@ function renderPriceChart(postalCode) {
 }
 
 function renderPlansAndEvents(p, center) {
-  const plansHtml = p.plans.length ? p.plans.map(pl => `
+  const plot = p.plot;
+  const plotHtml = plot ? `
+    <div class="plot-card">
+      <div class="plot-use"><span class="plot-code">${esc(plot.useCode || '')}</span> ${esc(plot.use || '')}</div>
+      ${detailGrid([
+        ['Plot (plan unit)', plot.id],
+        ['Permitted use', [plot.useCode, plot.use].filter(Boolean).join(' – ')],
+        ['Building rights', plot.buildingRights && `${fmtNum(plot.buildingRights)} m² floor area`],
+        ['Built floor area today', p.floorArea && `${fmtNum(p.floorArea)} m²`],
+        ['Plot area', plot.areaM2 && fmtArea(plot.areaM2)],
+        ['Set by detailed plan', plot.plan]
+      ])}
+    </div>` : `<p class="muted">No plot zoning found for this building.</p>`;
+
+  const plans = (p.plans || []).map(id => DATA.plans[id]).filter(Boolean);
+  const plansHtml = plans.length ? plans.map(pl => `
     <div class="news-item">
-      <div class="news-date"><i class="fa-solid fa-map"></i> ${esc(pl.status)}${pl.inForce ? ` • voimaan ${fmtDate(pl.inForce)}` : ''}</div>
-      <div class="news-title">Asemakaava ${esc(pl.id)}</div>
-      ${pl.approved && pl.approved !== pl.status ? `<div class="news-summary">Hyväksytty ${esc(pl.approved)}</div>` : ''}
+      <button class="item-toggle" aria-expanded="false" data-plan="${esc(pl.id)}">
+        <div class="news-date"><i class="fa-solid fa-map"></i> ${esc(pl.status)}${pl.inForce ? ` • in force since ${fmtDate(pl.inForce)}` : ''}</div>
+        <div class="news-title">Detailed plan ${esc(pl.id)}${plot && plot.plan === pl.id ? ' <span class="tag-small">sets this plot</span>' : ''}<i class="fa-solid fa-chevron-down chevron"></i></div>
+      </button>
+      <div class="item-details" hidden>
+        ${detailGrid([
+          ['Plan number', pl.id],
+          ['Status', pl.status],
+          ['Approved', pl.approved && fmtDate(pl.approved) + (pl.approvedBy ? ` (${pl.approvedBy})` : '')],
+          ['Confirmed', pl.confirmed && fmtDate(pl.confirmed)],
+          ['Legally valid', pl.legallyValid && fmtDate(pl.legallyValid)],
+          ['In force since', pl.inForce && fmtDate(pl.inForce)],
+          ['Plan area', pl.areaM2 && fmtArea(pl.areaM2)],
+          ['Record updated', pl.updated && fmtDate(pl.updated)]
+        ])}
+        <p class="muted"><i class="fa-solid fa-draw-polygon"></i> Plan boundary is outlined on the map.</p>
+      </div>
     </div>`).join('') : `<p class="muted">No detailed plan covers this building.</p>`;
 
   const nearby = DATA.events
@@ -391,28 +475,58 @@ function renderPlansAndEvents(p, center) {
     </a>`).join('') : `<p class="muted">No events within 800 m.</p>`;
 
   document.getElementById('newsList').innerHTML = `
-    <h4 class="sub-title">Zoning plans covering the building (Kaavahakemisto)</h4>${plansHtml}
+    <h4 class="sub-title">Plot zoning (Kaavayksiköt)</h4>${plotHtml}
+    <h4 class="sub-title">Detailed plans (asemakaava) covering the building</h4>${plansHtml}
     <h4 class="sub-title">Events nearby (Linked Events)</h4>${eventsHtml}`;
 }
 
+// Outline a detailed plan area on the map (geometry as published by the City of Helsinki)
+function showPlan(id) {
+  clearPlan();
+  const plan = DATA.plans[id];
+  if (!plan?.geometry) return;
+  planLayer = L.featureGroup([
+    L.geoJSON(plan.geometry, { interactive: false, style: STYLE.planHalo, smoothFactor: 0 }),
+    L.geoJSON(plan.geometry, { interactive: false, style: STYLE.plan, smoothFactor: 0 })
+  ]).addTo(map);
+  const sidebarWidth = document.getElementById('buildingSidebar').offsetWidth || 0;
+  map.flyToBounds(planLayer.getBounds(), { paddingTopLeft: [40, 40], paddingBottomRight: [sidebarWidth + 40, 40], duration: 0.6 });
+}
+
+function clearPlan() {
+  if (planLayer) map.removeLayer(planLayer);
+  planLayer = null;
+}
+
+// Expand / collapse a permit or plan item
+function toggleItem(btn) {
+  const open = btn.getAttribute('aria-expanded') !== 'true';
+  if (btn.dataset.plan) {
+    // only one plan outline at a time
+    document.querySelectorAll('.item-toggle[data-plan][aria-expanded="true"]').forEach(other => {
+      if (other !== btn) { other.setAttribute('aria-expanded', 'false'); other.nextElementSibling.hidden = true; }
+    });
+    if (open) showPlan(btn.dataset.plan); else clearPlan();
+  }
+  btn.setAttribute('aria-expanded', String(open));
+  btn.nextElementSibling.hidden = !open;
+}
+
 function closeSidebar() {
+  clearPlan();
   document.getElementById('buildingSidebar').classList.remove('open');
   if (activeId) layersOf(activeId).forEach(l => buildingLayer.resetStyle(l));
   activeId = null;
 }
 
-// ---------- Filters & search ----------
-
-function updateFilterCounts() {
-  document.getElementById('countAll').textContent = BUILDINGS.length;
-  document.getElementById('countResidential').textContent = BUILDINGS.filter(isResidential).length;
-  document.getElementById('countRecent').textContent = BUILDINGS.filter(p => (completedYear(p) || 0) >= 2010).length;
-  document.getElementById('countRenovated').textContent = BUILDINGS.filter(isRenovated).length;
-  document.getElementById('countProtected').textContent = BUILDINGS.filter(p => p.protection).length;
-}
+// ---------- Search ----------
 
 function setupEventListeners() {
   document.getElementById('closeSidebarBtn').addEventListener('click', closeSidebar);
+  document.getElementById('buildingSidebar').addEventListener('click', (e) => {
+    const btn = e.target.closest('.item-toggle');
+    if (btn) toggleItem(btn);
+  });
 
   document.querySelectorAll('.panel-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -420,16 +534,7 @@ function setupEventListeners() {
       document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(btn.dataset.tab)?.classList.add('active');
-    });
-  });
-
-  document.querySelectorAll('.filter-pill').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      currentFilter = btn.dataset.filter;
-      closeSidebar();
-      renderBuildings();
+      refreshPriceChart();
     });
   });
 
@@ -444,14 +549,14 @@ function setupEventListeners() {
     if (!val) { suggestions.style.display = 'none'; return; }
 
     const matches = BUILDINGS
-      .filter(p => p.address && ([p.address, ...p.otherAddresses].some(a => a.toLowerCase().includes(val)) || (p.postalCode || '').includes(val)))
+      .filter(p => p.address && ([p.address, ...(p.otherAddresses || [])].some(a => a.toLowerCase().includes(val)) || (p.postalCode || '').includes(val)))
       .slice(0, 12);
 
     suggestions.innerHTML = matches.length ? matches.map(m => `
       <div class="suggestion-item" data-id="${esc(m.id)}">
         <div>
           <strong>${esc(m.address)}</strong>
-          <span>${esc(m.postalCode || '')} • ${esc(m.purpose || m.type || '')}</span>
+          <span>${esc(m.postalCode || '')} • ${esc(m.class || '')}</span>
         </div>
         <span>${completedYear(m) || '?'}${m.apartments ? ` • ${m.apartments} apt.` : ''}</span>
       </div>`).join('')
@@ -463,10 +568,6 @@ function setupEventListeners() {
     const item = e.target.closest('.suggestion-item');
     if (!item) return;
     const id = item.dataset.id;
-    if (!layersOf(id).length) {
-      // The building is hidden by the active filter: reset to "all" first
-      document.querySelector('.filter-pill[data-filter="all"]').click();
-    }
     suggestions.style.display = 'none';
     selectBuilding(id);
     searchInput.value = BUILDINGS.find(b => b.id === id)?.address || '';

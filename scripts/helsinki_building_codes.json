@@ -1,0 +1,34 @@
+{
+  "source": "https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf",
+  "dataset": "https://hri.fi/data/fi/dataset/helsingin-rakennukset",
+  "licence": "CC BY 4.0, © Helsingin kaupunki",
+  "note": "Code explanations published with the Helsinki building register dataset (transcribed from the source PDF).",
+  "RA_LAMMONLAHDE": {
+    "1": "Kauko- tai aluelämpö",
+    "2": "Kevyt polttoöljy",
+    "3": "Raskas polttoöljy",
+    "4": "Sähkö",
+    "5": "Kaasu",
+    "6": "Kivihiili, koksi tms.",
+    "7": "Puu",
+    "8": "Turve",
+    "9": "Maalämpö tms.",
+    "10": "Muu"
+  },
+  "RA_KANTRAKAINE": {
+    "1": "Betoni tai kevytbetoni",
+    "2": "Tiili",
+    "3": "Teräs",
+    "4": "Puu",
+    "5": "Muu"
+  },
+  "RA_JULKISIVUMAT": {
+    "1": "Betoni",
+    "2": "Tiili",
+    "3": "Metallilevy",
+    "4": "Kivi",
+    "5": "Puu",
+    "6": "Lasi",
+    "7": "Muu"
+  }
+}
