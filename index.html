@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=6.2">
+  <link rel="stylesheet" href="style.css?v=7.2">
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -39,7 +39,7 @@
     <div class="search-section">
       <div class="search-input-wrapper">
         <i class="fa-solid fa-magnifying-glass search-icon"></i>
-        <input type="text" id="searchInput" placeholder="Search an address in the area (e.g. Pasilankatu, Ratamestarinkatu)..." autocomplete="off">
+        <input type="text" id="searchInput" placeholder="Search an address (e.g. Fredikanterassi 3 B 14, Pasilankatu)..." autocomplete="off">
         <button id="clearSearchBtn" class="clear-btn" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div id="searchSuggestions" class="search-suggestions"></div>
@@ -109,7 +109,6 @@
         <section id="tabSpecs" class="tab-body active">
           <h3 class="section-title"><i class="fa-solid fa-circle-info"></i> Building details</h3>
           <div class="specs-grid" id="specsGrid"></div>
-          <div id="matchNote" class="match-note"></div>
           <div class="info-alert">
             <i class="fa-solid fa-shield-halved"></i>
             <div>
@@ -137,12 +136,29 @@
               <span class="price-sub" id="priceSub">—</span>
               <h4 class="price-highlight" id="priceHighlight">—</h4>
             </div>
-            <span class="trend-badge positive" id="priceTrend"></span>
+            <span class="trend-badge" id="priceTrend"></span>
           </div>
           <div class="chart-container">
             <canvas id="priceHistoryChart"></canvas>
           </div>
           <p class="chart-footnote">Source: Statistics Finland, table 13mu – €/m² of old dwellings in housing companies by postal code, yearly. Area-level prices, not prices of this building.</p>
+
+          <div class="price-check">
+            <h5 class="detail-heading">Check an asking price</h5>
+            <p class="muted">Looking at a listing for a flat here? Enter its price and size to compare it with the area average. Nothing is sent or stored.</p>
+            <div class="price-check-form">
+              <label>Asking price (€)<input id="pcPrice" type="number" min="0" step="1000" inputmode="numeric" placeholder="e.g. 320000"></label>
+              <label>Size (m²)<input id="pcSize" type="number" min="0" step="0.5" inputmode="decimal" placeholder="e.g. 52"></label>
+              <label>Rooms
+                <select id="pcRooms">
+                  <option value="1">1 room</option>
+                  <option value="2" selected>2 rooms</option>
+                  <option value="3">3+ rooms</option>
+                </select>
+              </label>
+            </div>
+            <div id="pcResult" class="pc-result"></div>
+          </div>
         </section>
 
         <!-- TAB 5: Detailed plans & events -->
@@ -185,7 +201,7 @@
           <div class="license-badge cc">CC BY 4.0</div>
           <div class="license-info">
             <h4>Ryhti – buildings, addresses, building permits</h4>
-            <p>OGC API Features <em>open_building</em>, <em>open_address</em>, <em>open_permit_building</em>. Lähde: Syke, Ryhti. Open content is CC BY 4.0 (<a href="https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot" target="_blank">Syke metadata</a>, <a href="https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut" target="_blank">terms</a>).</p>
+            <p>OGC API Features <em>open_building</em>, <em>open_address</em>, <em>open_permit_building</em>. Lähde: Syke, Ryhti. Open content is CC BY 4.0 (<a href="https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot" target="_blank">Syke metadata</a>, <a href="https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut" target="_blank">terms</a>). Permit type labels from Syke's data model <a href="https://github.com/sykefi/rakennuskohteet" target="_blank">sykefi/rakennuskohteet</a> (CC BY 4.0).</p>
           </div>
         </div>
         <div class="license-item">
@@ -225,7 +241,7 @@
 
   <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="data/pasila-data.js?v=1792265757"></script>
-  <script src="app.js?v=7.0"></script>
+  <script src="data/pasila-data.js?v=1792269065"></script>
+  <script src="app.js?v=7.5"></script>
 </body>
 </html>

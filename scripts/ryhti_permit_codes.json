@@ -1,0 +1,13 @@
+{
+  "source": "https://github.com/sykefi/rakennuskohteet/blob/be5339e07544a91e7bcf8e7f96ef8f28f4e496f8/looginenmalli/elinkaarisaannot.md",
+  "repository": "https://github.com/sykefi/rakennuskohteet",
+  "licence": "CC BY 4.0, © Suomen ympäristökeskus (Syke)",
+  "note": "Values of the code list RakentamistoimenpiteenLaji (construction_action_type in Ryhti open_permit_building) as written in Syke's data model documentation. Code 08 is not included: the documentation labels it differently from other versions of the list.",
+  "RakentamistoimenpiteenLaji": {
+    "01": "Uusi rakennus tai rakennelma",
+    "02": "Laajentaminen",
+    "03": "Uudelleen rakentamiseen verrattava muutostyö",
+    "04": "Muu muutostyö",
+    "05": "Purkaminen"
+  }
+}

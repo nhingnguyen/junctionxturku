@@ -10,7 +10,9 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
 ├── app.js                  # Map, sidebar, search
 ├── style.css               # Styles
 ├── scripts/
-│   └── build_data.py       # Fetches open data and builds data/pasila-data.js
+│   ├── build_data.py                # Fetches open data and builds data/pasila-data.js
+│   ├── helsinki_building_codes.json # Code labels from Helsinki's building dataset (CC BY 4.0)
+│   └── ryhti_permit_codes.json      # Permit type labels from Syke's data model (CC BY 4.0)
 ├── data/
 │   └── pasila-data.js      # Generated dataset loaded by the page
 ├── README.md

@@ -14,6 +14,12 @@ const DATA = window.PASILA_DATA;
 const FEATURES = DATA.buildings.features;
 const BUILDINGS = [...new Map(FEATURES.map(f => [f.properties.id, f.properties])).values()];
 
+// Buildings grouped by property (kiinteistötunnus)
+const PARCELS = BUILDINGS.reduce((map, p) => {
+  if (p.propertyId) (map[p.propertyId] ||= []).push(p);
+  return map;
+}, {});
+
 // Paavo fields shown in the "Area" tab; labels come from the English PxWeb API
 const PAAVO_FIELDS = ['he_vakiy', 'he_kika', 'hr_mtu', 'te_taly', 'te_takk', 'te_as_valj', 'te_yks',
                       'te_laps', 'te_omis_as', 'te_vuok_as', 'ra_asunn', 'ra_as_kpa', 'ra_kt_as', 'ra_raky'];
@@ -66,6 +72,45 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   const dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// ---------- Address resolver ----------
+// Free text such as "Fredikanterassi 3 B 14, 00520 Helsinki" -> building id.
+
+const normAddr = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+function buildAddressIndex() {
+  const index = new Map();
+  const add = (key, id) => { if (!index.has(key)) index.set(key, id); };
+  BUILDINGS.forEach(p => {
+    [p.address, ...(p.otherAddresses || [])].filter(Boolean).forEach(a => {
+      const n = normAddr(a);
+      add(n, p.id);
+      // Ranges such as "Porvoonkatu 20-22" cover each number on that side of the street
+      const m = n.match(/^(.*?) (\d+)\s*-\s*(\d+)$/);
+      if (m) {
+        const [, street, from, to] = m;
+        const step = (to - from) % 2 === 0 ? 2 : 1;
+        for (let k = Number(from); k <= Number(to); k += step) add(`${street} ${k}`, p.id);
+      }
+    });
+  });
+  return index;
+}
+const ADDRESS_INDEX = buildAddressIndex();
+
+// A letter after the number is either part of the address ("19a", "19 a") or a staircase ("19 B 2").
+// Finnish listings write staircases in capitals after a space, so that case tries the plain number first.
+function resolveAddress(text) {
+  const m = text.split(',')[0].trim().match(/^(\D+?)\s*(\d+)(?:(\s*)([A-Za-zÅÄÖåäö])(?![A-Za-zÅÄÖåäö]))?/);
+  if (!m) return null;
+  const [, street, num, gap, letter] = m;
+  const base = `${normAddr(street)} ${num}`;
+  const withLetter = letter ? `${base}${letter.toLowerCase()}` : null;
+  const staircase = letter && gap && letter === letter.toUpperCase();
+  const order = staircase ? [base, withLetter] : [withLetter, base];
+  for (const key of order) if (key && ADDRESS_INDEX.has(key)) return ADDRESS_INDEX.get(key);
+  return null;
 }
 
 // ---------- Map ----------
@@ -215,6 +260,7 @@ function selectBuilding(id) {
   selectedPostal = p.postalCode;
   chartPostal = undefined;
   refreshPriceChart();
+  updatePriceCheck();
   renderPlansAndEvents(p, bounds.getCenter());
 
   document.getElementById('buildingSidebar').classList.add('open');
@@ -241,11 +287,6 @@ function renderSpecs(p) {
       <span class="spec-value">${esc(v)}</span>
     </div>`).join('');
 
-  const note = document.getElementById('matchNote');
-  note.innerHTML = p.verified
-    ? '<i class="fa-solid fa-circle-check"></i> Location verified: the Ryhti point of this building lies inside its footprint.'
-    : '<i class="fa-solid fa-circle-exclamation"></i> Not verified: the Ryhti point of this building lies outside its footprint (registers may differ).';
-  note.className = `match-note ${p.verified ? 'ok' : 'warn'}`;
 }
 
 function renderArea(postalCode) {
@@ -281,20 +322,15 @@ function withNow(permitValue, nowValue, fmt = (v) => v) {
   return `${fmt(permitValue)}${changed ? `  →  now ${fmt(nowValue)}` : ''}`;
 }
 
-// Permit progress derived from the dates Ryhti publishes
-function permitState(h) {
-  if (h.completed) return 'Completed';
-  if (h.start) return 'Under construction';
-  if (h.expires && h.expires < DATA.generated) return 'Not started, permit expired';
-  return 'Permit granted, not started';
-}
+// Permit type label (Syke data model, CC BY 4.0); codes without a licensed label are shown as codes
+const permitType = (h) => h.type || (h.typeCode ? `Construction action, code ${h.typeCode}` : 'Building permit');
 
 function permitDetails(h, p) {
   const m2 = (v) => `${fmtNum(v)} m²`;
   return `
     <h5 class="detail-heading">Permit</h5>
     ${detailGrid([
-      ['Progress (from dates)', permitState(h)],
+      ['Type of work', permitType(h)],
       ['Decision', h.decision && fmtDate(h.decision)],
       ['Construction started', h.start && fmtDate(h.start)],
       ['Completed', h.completed && fmtDate(h.completed)],
@@ -311,8 +347,8 @@ function permitDetails(h, p) {
       ['Total area', withNow(h.totalArea, p.totalArea, m2)],
       ['Volume', withNow(h.volume, p.volume, (v) => `${fmtNum(v)} m³`)]
     ])}
-    <p class="muted">Open data has the permit's dates and the building data stated in it. The type of work,
-    its description, drawings and conditions are only in Ryhti's licensed (paid) interface.</p>`;
+    <p class="muted">Open data has the permit's type, dates and the building data stated in it. The description
+    of the work, drawings and conditions are only in Ryhti's licensed (paid) interface.</p>`;
 }
 
 function renderTimeline(p) {
@@ -320,9 +356,8 @@ function renderTimeline(p) {
   const history = p.history || [];
   const items = history.map(h => ({
     date: h.completed || h.start || h.decision,
-    title: `Building permit ${h.permitId || ''}`.trim(),
+    title: permitType(h),
     desc: [
-      permitState(h),
       h.decision && `Decision ${fmtDate(h.decision)}`,
       h.start && `Started ${fmtDate(h.start)}`,
       h.completed && `Completed ${fmtDate(h.completed)}`
@@ -346,6 +381,32 @@ function renderTimeline(p) {
       ${r.details ? `<div class="item-details" hidden>${r.details}</div>` : ''}
     </div>`).join('')
     : `<p class="muted">No permits recorded in Ryhti for this building.</p>`;
+}
+
+// Compare an asking price the user enters with the StatFin average for the selected postal code
+function updatePriceCheck() {
+  const out = document.getElementById('pcResult');
+  const price = Number(document.getElementById('pcPrice').value);
+  const size = Number(document.getElementById('pcSize').value);
+  const type = document.getElementById('pcRooms').value;
+  if (!price || !size) { out.innerHTML = ''; return; }
+
+  const perM2 = price / size;
+  const { years, types, byPostal } = DATA.prices;
+  const series = byPostal[selectedPostal]?.[type];
+  const year = [...years].reverse().find(y => series?.price?.[y]);
+  if (!year) {
+    out.innerHTML = `<strong>${fmtNum(Math.round(perM2))} €/m²</strong><span class="muted"> – no StatFin average for this flat type in ${esc(selectedPostal || '—')}.</span>`;
+    return;
+  }
+  const avg = series.price[year];
+  const diff = (perM2 - avg) / avg * 100;
+  out.innerHTML = `
+    <strong>${fmtNum(Math.round(perM2))} €/m²</strong>
+    <span class="trend-badge">${diff > 0 ? '+' : ''}${diff.toFixed(1)}%</span>
+    <p class="muted">${Math.abs(diff).toFixed(1)}% ${diff > 0 ? 'above' : 'below'} the ${esc(year)} average of
+    ${fmtNum(avg)} €/m² for ${esc(types[type].toLowerCase())} in ${esc(selectedPostal)}${series.count?.[year] ? ` (${series.count[year]} sales)` : ''}.
+    Area average for old dwellings, not a valuation of this flat.</p>`;
 }
 
 // The chart is only drawn while the Prices tab is visible (and redrawn only when the postal code changes)
@@ -381,7 +442,7 @@ function renderPriceChart(postalCode) {
   if (lastYear && baseYear && baseYear !== lastYear) {
     const change = ((two[lastYear] - two[baseYear]) / two[baseYear]) * 100;
     trend.style.display = '';
-    trend.className = `trend-badge ${change >= 0 ? 'positive' : 'negative'}`;
+    trend.className = 'trend-badge';
     trend.innerHTML = `<i class="fa-solid fa-arrow-trend-${change >= 0 ? 'up' : 'down'}"></i> ${change >= 0 ? '+' : ''}${change.toFixed(1)}% (${baseYear}–${lastYear})`;
   } else {
     trend.style.display = 'none';
@@ -428,6 +489,8 @@ function renderPriceChart(postalCode) {
 
 function renderPlansAndEvents(p, center) {
   const plot = p.plot;
+  const parcel = PARCELS[p.propertyId] || [p];
+  const parcelArea = parcel.reduce((sum, b) => sum + (b.floorArea || 0), 0);
   const plotHtml = plot ? `
     <div class="plot-card">
       <div class="plot-use"><span class="plot-code">${esc(plot.useCode || '')}</span> ${esc(plot.use || '')}</div>
@@ -435,10 +498,13 @@ function renderPlansAndEvents(p, center) {
         ['Plot (plan unit)', plot.id],
         ['Permitted use', [plot.useCode, plot.use].filter(Boolean).join(' – ')],
         ['Building rights', plot.buildingRights && `${fmtNum(plot.buildingRights)} m² floor area`],
-        ['Built floor area today', p.floorArea && `${fmtNum(p.floorArea)} m²`],
+        ['Built floor area on the property', parcelArea && `${fmtNum(parcelArea)} m² (${parcel.length} building${parcel.length > 1 ? 's' : ''})`],
         ['Plot area', plot.areaM2 && fmtArea(plot.areaM2)],
         ['Set by detailed plan', plot.plan]
       ])}
+      ${parcel.length > 1 ? `<div class="parcel-buildings"><span class="muted">Buildings on this property:</span>
+        ${parcel.map(b => `<button class="chip${b.id === p.id ? ' current' : ''}" data-select="${esc(b.id)}" title="VTJ-PRT ${esc(b.vtj)}">${esc(b.address || b.vtj)}${b.class ? ` · ${esc(b.class)}` : ''}</button>`).join('')}
+      </div>` : ''}
     </div>` : `<p class="muted">No plot zoning found for this building.</p>`;
 
   const plans = (p.plans || []).map(id => DATA.plans[id]).filter(Boolean);
@@ -523,9 +589,12 @@ function closeSidebar() {
 
 function setupEventListeners() {
   document.getElementById('closeSidebarBtn').addEventListener('click', closeSidebar);
+  ['pcPrice', 'pcSize', 'pcRooms'].forEach(id => document.getElementById(id).addEventListener('input', updatePriceCheck));
   document.getElementById('buildingSidebar').addEventListener('click', (e) => {
     const btn = e.target.closest('.item-toggle');
     if (btn) toggleItem(btn);
+    const chip = e.target.closest('[data-select]');
+    if (chip && chip.dataset.select !== activeId) selectBuilding(chip.dataset.select);
   });
 
   document.querySelectorAll('.panel-tab').forEach(btn => {
@@ -548,9 +617,13 @@ function setupEventListeners() {
     clearBtn.style.display = val ? 'block' : 'none';
     if (!val) { suggestions.style.display = 'none'; return; }
 
-    const matches = BUILDINGS
-      .filter(p => p.address && ([p.address, ...(p.otherAddresses || [])].some(a => a.toLowerCase().includes(val)) || (p.postalCode || '').includes(val)))
-      .slice(0, 12);
+    // A full address ("Fredikanterassi 3 B 14, 00520") resolves to its building; otherwise substring search
+    const exactId = /\d/.test(val) ? resolveAddress(val) : null;
+    const matches = [
+      ...(exactId ? [BUILDINGS.find(b => b.id === exactId)] : []),
+      ...BUILDINGS.filter(p => p.id !== exactId && p.address &&
+        ([p.address, ...(p.otherAddresses || [])].some(a => a.toLowerCase().includes(val)) || (p.postalCode || '').includes(val)))
+    ].slice(0, 12);
 
     suggestions.innerHTML = matches.length ? matches.map(m => `
       <div class="suggestion-item" data-id="${esc(m.id)}">

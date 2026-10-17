@@ -48,12 +48,11 @@ A web map of the Pasila district (Helsinki). Click a building to see its details
 | Building class (e.g. *Residential blocks of flats*) | City of Helsinki + Statistics Finland | same layer | `c_rakennusluokka` → Classification of Buildings 2018 English label (Statistics Finland classifications API); fallback `tyyppi` |
 | Completion date, storeys, apartments, floor area, total area, volume, elevator | City of Helsinki (fallback: Ryhti) | `Rakennukset_alue_rekisteritiedot` | `c_valmpvm`, `i_kerrlkm`, `i_asuinhuoneistojen_lkm`, `i_kerrosala`, `i_kokala`, `i_raktilav`, `c_hissi` |
 | Heating energy source, load-bearing material, facade | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `c_poltaine`, `c_rakeaine`, `c_julkisivu` → Finnish labels from the dataset's [code explanations](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf) (stored in `scripts/helsinki_building_codes.json`) |
-| "Location verified" note | Ryhti + Helsinki | `open_building` point vs. Helsinki polygon | point-in-polygon test |
 | Protection in detailed plan | City of Helsinki | WFS `Asemakaavoissa_suojellut_rakennukset_alue` | `s_merk`, `kaava` (joined on `ratu = pys_raknro`) |
-| **Permit timeline** – click a permit for details | Ryhti | `open_permit_building` | `decision_date`, `start_date`, `completion_date`, `expiry_date`, `construction_to_be_completed_by_extension` (extension decision ID), `permanent_permit_identifier`, `dvv_permit_identifier` + building data stated in the permit (`number_of_storeys`, `apartment_count`, areas, `volume`). Progress is derived from the dates |
+| **Permit timeline** – click a permit for details | Ryhti + Syke data model | `open_permit_building` | `construction_action_type` (type of work, labelled from `sykefi/rakennuskohteet`), `decision_date`, `start_date`, `completion_date`, `expiry_date`, `construction_to_be_completed_by_extension` (extension decision ID), `permanent_permit_identifier`, `dvv_permit_identifier` + building data stated in the permit (`number_of_storeys`, `apartment_count`, areas, `volume`). The app shows these values as published and does not infer a status |
 | **Price history (€/m², sales)** | Statistics Finland | PxWeb `StatFin/ashi/13mu.px` | `keskihinta_aritm_nw`, `lkm_julk20` by postal code |
 | **Area statistics** | Statistics Finland (Paavo) | PxWeb `Postinumeroalueittainen_avoin_tieto/uusin/12f7.px` | `he_vakiy`, `hr_mtu`, `te_omis_as`, `ra_asunn`, … |
-| **Plot zoning** (permitted use, building rights, plot area) | City of Helsinki | WFS `avoindata:Kaavayksikot` | `kaavayksikkotunnus` (= property ID), `kayttotarkoitusluokka`, `rakennusoikeus`, `rekisteriala`, `kaavatunnus`; joined on the building's property ID, fallback point-in-polygon (586/616 buildings) |
+| **Plot zoning** (permitted use, building rights, plot area) | City of Helsinki | WFS `avoindata:Kaavayksikot` | `kaavayksikkotunnus` (= property ID), `kayttotarkoitusluokka`, `rakennusoikeus`, `rekisteriala`, `kaavatunnus`; joined only on the building's property ID, no location-based guessing (543/616 buildings) |
 | **Detailed plans (asemakaava) covering the building** – click a plan for details and its boundary on the map | City of Helsinki | WFS `Kaavahakemisto_alue_kaava_voimassa`, `…_vireilla` | `kaavatunnus`, `luokka`, `hyvaksymispvm`, `vahvistamispvm`, `lainvoimaisuuspvm`, `voimaantulopvm`, `pintaala`, `muokkauspvm`, `geometry` |
 | **Events nearby** | City of Helsinki | Linked Events API | `name.en` (fallback `fi`), `start_time`, `location.name.en`, `location.position` |
 | Base maps | OpenStreetMap; City of Helsinki | OSM tiles; WMS `Ortoilmakuva_2025_5cm`, `Kantakartta` | raster tiles, loaded at run time |
@@ -167,7 +166,7 @@ Code fields are URIs pointing to koodistot.suomi.fi code lists. **The app does n
 
 ### 3.4 Building permits – Ryhti `open_permit_building`
 
-A building permit (*rakennuslupa*) is the municipality's decision allowing construction work. Ryhti's open data has the permit's dates and IDs, plus the building data stated in the permit (as the building will be after the work). The type of work and status are only code URIs whose labels come from koodistot.suomi.fi, which has no published licence, so the app does not show them; it derives progress from the dates instead (completed / under construction / not started / expired). The description of the work, drawings and conditions are only in Ryhti's licensed, paid interface (stated in the [Syke metadata](https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot)).
+A building permit (*rakennuslupa*) is the municipality's decision allowing construction work. Ryhti's open data has the permit's dates and IDs, plus the building data stated in the permit (as the building will be after the work). The type of work (`construction_action_type`, e.g. `…/Rakentamistoimenpide/code/02`) is labelled from Syke's own data model [sykefi/rakennuskohteet](https://github.com/sykefi/rakennuskohteet/blob/be5339e07544a91e7bcf8e7f96ef8f28f4e496f8/looginenmalli/elinkaarisaannot.md) (CC BY 4.0): 01 Uusi rakennus tai rakennelma (new building), 02 Laajentaminen (extension), 03 Uudelleen rakentamiseen verrattava muutostyö (alteration comparable to rebuilding), 04 Muu muutostyö (other alteration), 05 Purkaminen (demolition); stored in `scripts/ryhti_permit_codes.json`. The status code has no licensed label list with code numbers, so the app does not show a status; it shows the published dates (decision, start, completion, expiry) only. The description of the work, drawings and conditions are only in Ryhti's licensed, paid interface (stated in the [Syke metadata](https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot)).
 
 **Request:** `https://paikkatiedot.ymparisto.fi/geoserver/ryhti_permit/ogc/features/v1/collections/open_permit_building/items?bbox=…&limit=2000&f=json`
 **Response:** One feature per permitted construction action. 924 in the BBOX; 520 buildings have at least one.
@@ -197,7 +196,8 @@ A building permit (*rakennuslupa*) is the municipality's decision allowing const
 |---|---|---|
 | Building class (`c_rakennusluokka`, e.g. `0121`) | Statistics Finland classifications API `https://data.stat.fi/api/classifications/v2/classifications/rakennus_1_20180712/classificationItems?lang=en` → *Residential blocks of flats* | CC BY 4.0 |
 | Heating energy source, load-bearing material, facade (`c_poltaine`, `c_rakeaine`, `c_julkisivu`) | Code explanations published with the Helsinki building dataset ([PDF](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf)), transcribed into `scripts/helsinki_building_codes.json` (Finnish only) | CC BY 4.0 (part of `helsingin-rakennukset`) |
-| Ryhti code URIs (`main_purpose`, `heating_energy_source`, materials, `construction_action_type`, `status_of_construction_action`, `construction_method`) | koodistot.suomi.fi | **No published licence → not used** |
+| Permit type (`construction_action_type`, codes 01–05) | Syke data model [sykefi/rakennuskohteet](https://github.com/sykefi/rakennuskohteet) (LICENSE: CC BY 4.0), transcribed into `scripts/ryhti_permit_codes.json` | CC BY 4.0 |
+| Other Ryhti code URIs (`main_purpose`, `heating_energy_source`, materials, `status_of_construction_action`, `construction_method`) | koodistot.suomi.fi | **No published licence → not used** |
 
 ### 3.6 Protected buildings – City of Helsinki WFS
 
@@ -318,7 +318,7 @@ The app stores `name.en` (falling back to `fi`), `location.name.en`, start/end, 
 ## 4. Join logic (build_data.py)
 
 1. **Footprint → building:** use the polygon's `vtj_prt` from the Helsinki register. Without a link, a footprint is matched to a Ryhti building only if exactly one Ryhti point lies inside it. Otherwise it is kept as non-clickable *context*.
-2. **Verification:** for each linked footprint, check that the building's own Ryhti point lies inside the polygon. Result: **626 / 642 verified, 6 mismatches** (the two registers disagree). The app shows this per building.
+2. **Verification:** for each linked footprint, check that the building's own Ryhti point lies inside the polygon. Result: **626 / 642 verified, 6 mismatches** (the two registers disagree). This is a build-time quality check printed in the build log; the app does not show conclusions of its own.
 3. **Ryhti attributes, addresses, permits:** joined on `permanent_building_identifier` (= VTJ-PRT). Addresses are joined via `building_key`.
 4. **Protection:** `ratu` (Helsinki building number) = `pys_raknro`.
 5. **Detailed plans:** point-in-polygon of the building point in plan areas. Each plan used is stored once in `plans` (details + boundary as published); buildings reference plan numbers.
@@ -358,8 +358,7 @@ One building feature (geometry unchanged from 3.1):
     "plans": ["12360"],
     "history": [ { "decision": "2020-04-23", "start": "2021-08-18", "completed": "2022-11-29",
                    "permitId": "3002201897", "dvvId": "09100020-02460012004",
-                   "storeys": 8, "apartments": 51, "grossFloorArea": 4783, "floorArea": 2795, "totalArea": 5396, "volume": 18310 } ],
-    "verified": true
+                   "storeys": 8, "apartments": 51, "grossFloorArea": 4783, "floorArea": 2795, "totalArea": 5396, "volume": 18310 } ]
   }
 }
 ```
@@ -391,14 +390,32 @@ The build prints every Finnish value it could not resolve to an official English
 | StatFin `ashi/13mu`, Paavo `12f7` (PxWeb) | Prices, area statistics | CC BY 4.0 | [Statistics Finland: Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces), [Terms of use](https://stat.fi/en/about-us/get-to-know-statistics-finland/legislation/terms-of-use); Paavo also listed as CC BY 4.0 on [research.fi](https://research.fi/en/results/dataset/ff0c88e8-5d2c-4e8f-85ef-96d6a951c552) | © Tilastokeskus |
 | Statistics Finland classifications API `rakennus_1_20180712` | Building class (fi + en) | CC BY 4.0 | [Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces) (lists the classifications API under the open-data licence) | © Tilastokeskus |
 | Helsinki building register code explanations (PDF) | Energy source, material, facade labels | CC BY 4.0 | Linked from [HRI: helsingin-rakennukset](https://hri.fi/data/fi/dataset/helsingin-rakennukset) | © Helsingin kaupunki |
+| Syke GitHub `sykefi/rakennuskohteet` | Permit type labels (codes 01–05) | CC BY 4.0 | [LICENSE](https://github.com/sykefi/rakennuskohteet/blob/HEAD/LICENSE) in the repository | Syke |
 | Linked Events | Events | CC BY 4.0 | [HRI: linked-events-tapahtumarajapinta](https://hri.fi/data/fi/dataset/linked-events-tapahtumarajapinta) | City of Helsinki |
 | OpenStreetMap tiles | Default base map | ODbL + Tile Usage Policy | [OSM copyright](https://www.openstreetmap.org/copyright), [Tile policy](https://operations.osmfoundation.org/policies/tiles/) | © OpenStreetMap contributors |
 
-**Rule:** a source is used only if its licence is stated by the publisher. **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit type/status labels, construction method or Ryhti's purpose label.
+**Rules:** a source is used only if its licence is stated by the publisher, and the app shows published values without drawing its own conclusions (no inferred statuses, no verification verdicts, no good/bad colouring; plots are linked only by ID). **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit status labels, construction method or Ryhti's purpose label (permit types come from Syke's CC BY data model instead).
 
 Attribution is shown in the map corner and in the *Sources & Licences* dialog.
 
-**Not available as legal open data, so not shown:** apartments for sale (Etuovi and Oikotie have no open API and forbid scraping), per-apartment or per-building transaction prices, and land prices per parcel.
+**Not available as legal open data, so not shown:** apartments for sale or rent, per-apartment or per-building transaction prices, and land prices per parcel.
+
+### 6.1 Listings (for sale / for rent)
+
+Scraping Etuovi, Vuokraovi or Oikotie and attaching listings to parcels was evaluated and **rejected**:
+
+| Site | robots.txt | Terms of use |
+|---|---|---|
+| Etuovi.com, Vuokraovi.com (Alma Media) | Vuokraovi disallows `/api/*` for all agents | [Alma Media marketplace terms](https://www.almamedia.fi/markkinapaikkaehdot/#etuovi-vuokraovi): using search robots or other technical tools to collect content, and building your own service or dataset from parts of the service, are forbidden without prior written consent |
+| Oikotie Asunnot | `User-agent: * / Disallow: /` | [Oikotie terms](https://asunnot.oikotie.fi/sopimukset): regular, systematic or continuous collection, storage, indexing or distribution is not allowed without written permission |
+
+Listings also contain personal data (agents, sellers), and the listing databases are protected as catalogues/databases under the Finnish Copyright Act.
+
+**What the app does instead (legal):**
+- **Address resolver** – a pasted listing address such as `Fredikanterassi 3 B 14, 00520 Helsinki` resolves to the right building. It strips staircase/apartment parts, keeps house letters (`19a`), expands ranges (`Porvoonkatu 20-22`) and uses secondary entrances from Ryhti.
+- **Parcel summary** – all buildings on the same property (kiinteistötunnus), their total floor area against the plot's building rights.
+- **Asking-price check** – the user types the price and size of a listing they are viewing; the app compares €/m² with the StatFin average for the postal code and flat size. Nothing is sent or stored.
+- A real listings feed would need a written data agreement with Alma Media or Oikotie (their partner interfaces are for business customers).
 
 ---
 

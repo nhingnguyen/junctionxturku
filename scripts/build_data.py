@@ -15,6 +15,7 @@ Only official open data with a verified licence is used, every source is CC BY 4
   - Events                                    Linked Events API (api.hel.fi)                    (hri.fi: linked-events-tapahtumarajapinta)
   - Classification of Buildings 2018          Statistics Finland classifications API (data.stat.fi)
   - Helsinki register code explanations       scripts/helsinki_building_codes.json (from the helsingin-rakennukset dataset)
+  - Permit type labels (codes 01-05)          scripts/ryhti_permit_codes.json (from Syke's CC BY repo sykefi/rakennuskohteet)
 
 Code-list labels from koodistot.suomi.fi are NOT used: the service publishes no licence for its content.
 
@@ -37,6 +38,7 @@ BBOX = [24.915, 60.191, 24.950, 60.209]
 
 ROOT = Path(__file__).resolve().parent.parent
 HELSINKI_CODES = json.loads((Path(__file__).resolve().parent / "helsinki_building_codes.json").read_text(encoding="utf-8"))
+PERMIT_CODES = json.loads((Path(__file__).resolve().parent / "ryhti_permit_codes.json").read_text(encoding="utf-8"))
 OUT = ROOT / "data" / "pasila-data.js"
 INDEX = ROOT / "index.html"
 
@@ -329,7 +331,11 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
     permits_by_vtj = {}
     for f in permits:
         p = f["properties"]
+        type_code = (p.get("construction_action_type") or "").rsplit("/", 1)[-1] or None
+        type_label = PERMIT_CODES["RakentamistoimenpiteenLaji"].get(type_code or "")
         permits_by_vtj.setdefault(p["permanent_building_identifier"], []).append({
+            "typeCode": type_code,
+            "type": english(type_label) if type_label else None,
             "decision": d10(p["decision_date"]), "start": d10(p["start_date"]),
             "completed": d10(p["completion_date"]), "expires": d10(p.get("expiry_date")),
             "extensionDecision": p.get("construction_to_be_completed_by_extension"),
@@ -352,10 +358,9 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
 
     plan_items = [(bounds_of(pl["geometry"]), pl) for pl in plans if polygons_of(pl["geometry"])]
 
-    # Plan units (plots) currently in force: by plot id, plus a spatial fallback
+    # Plan units (plots) currently in force, linked only by plot id = property id (no spatial guessing)
     plots_valid = [pl for pl in plots if pl["properties"].get("luokka") == "Voimassa" and polygons_of(pl["geometry"])]
     plot_by_id = {pl["properties"]["kaavayksikkotunnus"]: pl["properties"] for pl in plots_valid}
-    plot_items = [(bounds_of(pl["geometry"]), pl) for pl in plots_valid]
     plans_used = {}  # plan id -> details + boundary (stored once, buildings reference the id)
 
     stats = {"register": 0, "spatial": 0, "verified": 0, "mismatch": 0, "context": 0}
@@ -428,13 +433,9 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
                     })
                 plans_here.append(pid)
 
-        # Plot zoning: the plan unit whose id equals the building's property id, else the plot under the building
+        # Plot zoning: the plan unit whose id equals the building's property id
         property_id = h.get("c_kiinteistotunnus") or rp.get("property_identifier")
         plot = plot_by_id.get(plot_key(property_id))
-        if not plot:
-            hits = [pl["properties"] for (x0, y0, x1, y1), pl in plot_items
-                    if x0 <= anchor[0] <= x1 and y0 <= anchor[1] <= y1 and point_in_geom(anchor[0], anchor[1], pl["geometry"])]
-            plot = min(hits, key=lambda q: q.get("rekisteriala") or 1e12) if hits else None
 
         props = {
             "id": vtj,
@@ -459,7 +460,6 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
             "plot": plot_info(plot) if plot else None,
             "plans": sorted(plans_here, key=lambda i: plans_used[i].get("inForce") or "9999", reverse=True),
             "history": sorted(permits_by_vtj.get(vtj, []), key=lambda x: x["decision"] or x["start"] or "", reverse=True),
-            "verified": vtj in verified,
         }
         for part in parts:
             features.append({"type": "Feature", "geometry": part["geometry"],
