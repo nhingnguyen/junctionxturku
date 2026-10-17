@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pasila Intelligence</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="style.css?v=5.0">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-logo">
+        <i class="fa-solid fa-city"></i>
+      </div>
+      <div class="brand-text">
+        <h1>Pasila Intelligence</h1>
+        <p class="subtitle">Open data: City of Helsinki, Ryhti (Syke) &amp; Statistics Finland</p>
+      </div>
+    </div>
+
+    <!-- Quick Search Bar -->
+    <div class="search-section">
+      <div class="search-input-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="searchInput" placeholder="Search an address in the area (e.g. Pasilankatu, Ratamestarinkatu)..." autocomplete="off">
+        <button id="clearSearchBtn" class="clear-btn" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="searchSuggestions" class="search-suggestions"></div>
+    </div>
+
+    <!-- Status & Legal Actions -->
+    <div class="header-actions">
+      <div class="api-badge" id="apiStatusBadge">
+        <span class="status-dot online"></span>
+        <span class="badge-text">Data snapshot: <span id="dataDate">—</span></span>
+      </div>
+      <button class="btn btn-outline" id="legalBtn" title="Data sources and licences">
+        <i class="fa-solid fa-scale-balanced"></i> Sources &amp; Licences
+      </button>
+    </div>
+  </header>
+
+  <!-- Filter & Stats Bar -->
+  <div class="filter-bar">
+    <div class="filter-pills">
+      <button class="filter-pill active" data-filter="all">All buildings (<span id="countAll">0</span>)</button>
+      <button class="filter-pill" data-filter="residential">Residential (<span id="countResidential">0</span>)</button>
+      <button class="filter-pill" data-filter="recent">Built 2010 or later (<span id="countRecent">0</span>)</button>
+      <button class="filter-pill" data-filter="renovated">Alteration / extension permits (<span id="countRenovated">0</span>)</button>
+      <button class="filter-pill" data-filter="protected">Protected (<span id="countProtected">0</span>)</button>
+    </div>
+    <div class="area-indicator">
+      <i class="fa-solid fa-location-dot"></i> Data area: <strong>Länsi-, Keski- &amp; Itä-Pasila (BBOX)</strong>
+    </div>
+  </div>
+
+  <!-- Main Workspace -->
+  <main class="main-container">
+    <!-- Map Container -->
+    <div id="map"></div>
+
+    <!-- Loading Overlay -->
+    <div id="mapLoader" class="map-loader">
+      <div class="spinner"></div>
+      <p>Loading building data...</p>
+    </div>
+
+    <!-- Building Panel (Sidebar) -->
+    <aside id="buildingSidebar" class="building-sidebar">
+      <button class="close-sidebar-btn" id="closeSidebarBtn" title="Close panel"><i class="fa-solid fa-xmark"></i></button>
+
+      <!-- Building Hero Card -->
+      <div class="building-hero">
+        <div class="hero-tags">
+          <span class="hero-tag tag-purpose" id="heroPurpose">—</span>
+          <span class="hero-tag tag-year" id="heroYear">—</span>
+          <span class="hero-tag tag-apartments" id="heroApts">—</span>
+        </div>
+        <h2 class="building-title" id="buildingTitle">Select a building</h2>
+        <p class="building-postal" id="buildingPostal"><i class="fa-solid fa-map-pin"></i> —</p>
+        <div class="national-ids">
+          <span title="Permanent national building identifier">VTJ-PRT: <strong id="valVtjId">—</strong></span>
+          <span title="Property (cadastral) identifier">Kiinteistötunnus: <strong id="valPropertyId">—</strong></span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs inside Sidebar -->
+      <div class="panel-tabs">
+        <button class="panel-tab active" data-tab="tabSpecs"><i class="fa-solid fa-building"></i> Building</button>
+        <button class="panel-tab" data-tab="tabArea"><i class="fa-solid fa-people-roof"></i> Area</button>
+        <button class="panel-tab" data-tab="tabHistory"><i class="fa-solid fa-screwdriver-wrench"></i> Permits</button>
+        <button class="panel-tab" data-tab="tabPrice"><i class="fa-solid fa-chart-line"></i> Prices</button>
+        <button class="panel-tab" data-tab="tabNews"><i class="fa-solid fa-map"></i> Plans</button>
+      </div>
+
+      <!-- Tab Contents -->
+      <div class="tab-bodies">
+        <!-- TAB 1: Building details -->
+        <section id="tabSpecs" class="tab-body active">
+          <h3 class="section-title"><i class="fa-solid fa-circle-info"></i> Building details</h3>
+          <div class="specs-grid" id="specsGrid"></div>
+          <div id="matchNote" class="match-note"></div>
+          <div class="info-alert">
+            <i class="fa-solid fa-shield-halved"></i>
+            <div>
+              <strong>Source:</strong> City of Helsinki building register (footprint, address, areas) joined with Ryhti / Syke (heating, materials) by VTJ-PRT.
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: Postal code area statistics (Paavo) -->
+        <section id="tabArea" class="tab-body">
+          <h3 class="section-title"><i class="fa-solid fa-people-roof"></i> Postal code area statistics</h3>
+          <div id="areaContainer"></div>
+        </section>
+
+        <!-- TAB 3: Permit & renovation timeline -->
+        <section id="tabHistory" class="tab-body">
+          <h3 class="section-title"><i class="fa-solid fa-clock-rotate-left"></i> Building permits &amp; alterations (Ryhti)</h3>
+          <div class="timeline" id="permitTimeline"></div>
+        </section>
+
+        <!-- TAB 4: Price history (Statistics Finland) -->
+        <section id="tabPrice" class="tab-body">
+          <div class="price-header">
+            <div>
+              <span class="price-sub" id="priceSub">—</span>
+              <h4 class="price-highlight" id="priceHighlight">—</h4>
+            </div>
+            <span class="trend-badge positive" id="priceTrend"></span>
+          </div>
+          <div class="chart-container">
+            <canvas id="priceHistoryChart"></canvas>
+          </div>
+          <p class="chart-footnote">Source: Statistics Finland, table 13mu – €/m² of old dwellings in housing companies by postal code, yearly. Area-level prices, not prices of this building.</p>
+        </section>
+
+        <!-- TAB 5: Zoning plans & events -->
+        <section id="tabNews" class="tab-body">
+          <h3 class="section-title"><i class="fa-solid fa-bullhorn"></i> Zoning plans &amp; events around the building</h3>
+          <div class="news-list" id="newsList"></div>
+        </section>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Sources & Licences Modal -->
+  <div id="legalModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <i class="fa-solid fa-scale-balanced modal-icon"></i>
+          <div>
+            <h3>Data sources &amp; licences</h3>
+            <p>Only official open data is used; every source is credited as its licence requires</p>
+          </div>
+        </div>
+        <button id="closeLegalModalBtn" class="close-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="license-item">
+          <div class="license-badge cc">CC BY 4.0</div>
+          <div class="license-info">
+            <h4>Buildings, protection, zoning plans, base maps – City of Helsinki</h4>
+            <p>WFS/WMS kartta.hel.fi: <em>Rakennukset_alue_rekisteritiedot</em>, <em>Asemakaavoissa_suojellut_rakennukset</em>, <em>Kaavahakemisto</em>, <em>Ortoilmakuva 2025</em>, <em>Kantakartta</em>. © Helsingin kaupunki, CC BY 4.0 (<a href="https://hri.fi/data/fi/dataset/helsingin-rakennukset" target="_blank">HRI</a>). Footprint geometries are displayed exactly as published.</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge cc">CC BY 4.0</div>
+          <div class="license-info">
+            <h4>Ryhti – buildings, addresses, building permits</h4>
+            <p>OGC API Features <em>open_building</em>, <em>open_address</em>, <em>open_permit_building</em>. Lähde: Syke, Ryhti. Syke open data is licensed under <a href="https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut" target="_blank">CC BY 4.0</a>.</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge stat">STAT FIN</div>
+          <div class="license-info">
+            <h4>Prices of old dwellings (13mu) &amp; Paavo postal code statistics</h4>
+            <p>PxWeb API. © Tilastokeskus, CC BY 4.0.</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge cc">CC BY 4.0</div>
+          <div class="license-info">
+            <h4>Events – Linked Events (City of Helsinki)</h4>
+            <p>api.hel.fi/linkedevents (<a href="https://hri.fi/data/fi/dataset/linked-events-tapahtumarajapinta" target="_blank">HRI</a>).</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge nls">ODbL</div>
+          <div class="license-info">
+            <h4>OpenStreetMap base map</h4>
+            <p>© OpenStreetMap contributors. Used unmodified under the Tile Usage Policy; the app only draws overlays on top.</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge notice">NOT SHOWN</div>
+          <div class="license-info">
+            <h4>Apartments for sale &amp; per-apartment prices</h4>
+            <p>No legal open source exists (Etuovi and Oikotie have no open API and prohibit scraping). The app does not show such data; prices are available only at postal code level.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="confirmLegalBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="data/pasila-data.js"></script>
+  <script src="app.js?v=5.0"></script>
+</body>
+</html>
