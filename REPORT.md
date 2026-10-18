@@ -1,4 +1,4 @@
-# Pasila Intelligence – Technical & Data Report
+# Property Checker Platform – Technical & Data Report
 
 A web map of the Pasila district (Helsinki). Click a building to see its details, building-permit history, area price development, postal-area statistics, detailed plans, nearby events, traffic noise and the nearest environmental permit facility. An optional AI assistant panel can focus the map on the places it names (§9). Only official open data with a verified licence is used (§6). The app is English-only: it uses the official English labels published by the sources; values without an official translation are shown in Finnish (see §5.1).
 
@@ -501,7 +501,7 @@ The *Assistant* button opens a side panel with an iframe (`#assistantFrame`, loa
 ```ts
 window.parent?.postMessage({ type: "assistant:reply", text: data.reply }, "http://localhost:8000");
 ```
-This is the only change made in the agent's code (marked `ADDED FOR PASILA INTELLIGENCE (map focus)` in `frontend/src/app/page.tsx`). Pasila accepts the message only when it comes from the iframe's window and origin, then matches the text against the official data only:
+This is the only change made in the agent's code (marked `ADDED FOR PASILA INTELLIGENCE (map focus)` in `frontend/src/app/page.tsx`). The app accepts the message only when it comes from the iframe's window and origin, then matches the text against the official data only:
 
 1. VTJ-PRT and property ID (kiinteistötunnus);
 2. street addresses (all buildings at an address, narrowed when a VTJ-PRT is also named);
