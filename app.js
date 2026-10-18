@@ -44,6 +44,12 @@ let selectedPostal = null;
 let chartPostal;              // postal code the price chart was last drawn for
 let planLayer = null;         // outline of the detailed plan opened in the Plans tab
 let mentionedIds = new Set(); // buildings named in the assistant's last reply
+let articlesFor;               // building the Articles tab was last loaded for
+const articleCache = new Map(); // address -> the agent's article reply (a pending request)
+const suggestionCache = new Map(); // building id -> the agent's AI suggestion reply
+const suggestionPending = new Set(); // building ids whose AI suggestion is being fetched
+let articlesTimer = null;      // short delay so quickly clicking through buildings sends no requests
+const ARTICLES_DELAY_MS = 800;
 
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
@@ -274,6 +280,8 @@ function selectBuilding(id) {
   selectPostal(p.postalCode);
   renderPlansAndEvents(p, bounds.getCenter());
   renderEnvironment(p);
+  articlesFor = undefined;
+  refreshArticles();
 
   document.getElementById('buildingSidebar').classList.add('open');
 }
@@ -615,11 +623,13 @@ function renderEnvironment(p) {
     ${renderPower(p)}
     <h4 class="sub-title">Indoor radon (postal code ${esc(p.postalCode || '—')})</h4>
     ${radonHtml(p.postalCode)}`;
-  document.getElementById('aiSuggestion').innerHTML = '';
+  const cached = suggestionCache.get(activeId);
+  document.getElementById('aiSuggestion').innerHTML = cached ? renderMarkdown(cached)
+    : suggestionPending.has(activeId) ? '<p class="muted">Asking the AI assistant…</p>' : '';
+  document.getElementById('aiSuggestBtn').disabled = suggestionPending.has(activeId);
 }
 
-// AI suggestion for the Environment tab: the agent's API (agent/backend) reads the facts shown below it
-// and searches news / official press releases about the address (Articles MCP, see agent/articles.md)
+// AI suggestion for the Environment tab: the agent's API (agent/backend) summarizes the facts shown below it
 const AGENT_API = window.PASILA_CONFIG.agentApi;
 const AGENT_MAX_MESSAGE = 4000; // /chat rejects longer messages
 
@@ -650,17 +660,20 @@ function renderMarkdown(text) {
 async function requestAiSuggestion() {
   const id = activeId;
   const p = layersOf(id)[0]?.feature.properties;
-  if (!p) return;
+  if (!p || suggestionPending.has(id)) return;
   const out = document.getElementById('aiSuggestion');
+  // One request per building: show the earlier reply instead of asking again
+  if (suggestionCache.has(id)) { out.innerHTML = renderMarkdown(suggestionCache.get(id)); return; }
   const btn = document.getElementById('aiSuggestBtn');
   const intro = `Building at ${p.address || titleOf(p)}, postal code ${p.postalCode || '—'} Helsinki (VTJ-PRT ${p.vtj || '—'}).\n` +
     'Environment data from official sources:\n';
   const ask = '\n\nIn at most 2 short plain sentences (under 45 words in total), no bullet points or headings, summarize the most important findings ' +
-    'about this building and its surroundings, including verified news or official press releases about incidents at this address. ' +
-    'State facts only: do not judge whether it is a good or suitable place to live and do not give advice. Use only the data given and what the tools return.';
+    'about this building and its surroundings. ' +
+    'State facts only: do not judge whether it is a good or suitable place to live and do not give advice. Use only the data given above: do not call any tools or search for news.';
   const facts = document.getElementById('envContainer').innerText.slice(0, AGENT_MAX_MESSAGE - intro.length - ask.length);
+  suggestionPending.add(id);
   btn.disabled = true;
-  out.innerHTML = '<p class="muted">Asking the AI assistant… searching articles can take a minute.</p>';
+  out.innerHTML = '<p class="muted">Asking the AI assistant…</p>';
   try {
     const res = await fetch(`${AGENT_API}/chat`, {
       method: 'POST',
@@ -669,12 +682,63 @@ async function requestAiSuggestion() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    suggestionCache.set(id, data.reply);
     if (activeId === id) out.innerHTML = renderMarkdown(data.reply);
   } catch (e) {
     if (activeId === id) out.innerHTML = `<p class="muted">Could not reach the AI assistant at ${esc(AGENT_API)}. Start the agent backend and try again. (${esc(e.message)})</p>`;
   } finally {
-    btn.disabled = false;
+    suggestionPending.delete(id);
+    if (activeId === id) btn.disabled = false;
   }
+}
+
+// Articles tab: news, official press releases and City of Helsinki decisions about the selected building's
+// address. The agent (agent/backend /chat) searches and verifies them with its tools (agent/articles.md).
+// Loaded only while the tab is open, once per address, after a short delay.
+function refreshArticles() {
+  if (!document.getElementById('tabArticles').classList.contains('active') || !activeId || articlesFor === activeId) return;
+  articlesFor = activeId;
+  const id = activeId;
+  const p = layersOf(id)[0].feature.properties;
+  const list = document.getElementById('articlesList');
+  if (!p.address) { list.innerHTML = '<p class="muted">This building has no registered address to search for.</p>'; return; }
+
+  list.innerHTML = `<p class="muted"><i class="fa-solid fa-spinner fa-spin"></i> Asking the AI assistant for news and City of Helsinki decisions about ${esc(p.address)}… this can take a minute.</p>`;
+  clearTimeout(articlesTimer);
+  if (articleCache.has(p.address)) { showArticles(id, p.address); return; }
+  articlesTimer = setTimeout(() => {
+    if (activeId !== id || articleCache.has(p.address)) return;
+    const message = `For the building at ${p.address}, ${p.postalCode || ''} Helsinki, find (1) Finnish and English news articles and official press releases ` +
+      'about this address, including accidents and incidents (fires, traffic or workplace accidents, police events), and (2) City of Helsinki decisions (paatokset.hel.fi) about this property or address. ' +
+      'Do not look up or mention environmental data (noise, flood, radon, water supply, electricity, risk profiles). ' +
+      'List only items you verified at the source, newest first, under two short headings "News" and "City of Helsinki decisions"; ' +
+      'one bullet point each: the title as a Markdown link to the original page, then the source and date. ' +
+      'If a section has nothing, say so in one sentence. No other text.';
+    const request = fetch(`${AGENT_API}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    }).then(async res => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      return data.reply;
+    });
+    articleCache.set(p.address, request);
+    request.catch(() => articleCache.delete(p.address)); // let the next visit try again
+    showArticles(id, p.address);
+  }, ARTICLES_DELAY_MS);
+}
+
+function showArticles(id, address) {
+  const list = document.getElementById('articlesList');
+  articleCache.get(address)
+    .then(reply => {
+      if (activeId === id) list.innerHTML = `<div class="article-reply">${renderMarkdown(reply)}</div>
+        <p class="chart-footnote">Found by the AI assistant in Finnish and English news, official press releases and City of Helsinki decisions. Not official data; open the links to check. No result does not mean nothing has happened there.</p>`;
+    })
+    .catch(e => {
+      if (activeId === id) list.innerHTML = `<p class="muted">Could not reach the AI assistant at ${esc(AGENT_API)}. Start the agent backend and try again. (${esc(e.message)})</p>`;
+    });
 }
 
 function renderWater(p) {
@@ -1018,6 +1082,7 @@ function setupEventListeners() {
       btn.classList.add('active');
       document.getElementById(btn.dataset.tab)?.classList.add('active');
       refreshPriceChart();
+      refreshArticles();
     });
   });
 
