@@ -342,7 +342,7 @@ function renderArea(postalCode) {
           <span class="spec-value">${fmtNum(v[k])}</span>
         </div>`).join('')}
     </div>
-    <p class="chart-footnote">Source: Statistics Finland, Paavo – open data by postal code area (CC BY 4.0).</p>
+    <p class="chart-footnote">Source: Statistics Finland, Paavo (CC BY 4.0).</p>
     ${radon}`;
 }
 
@@ -605,13 +605,10 @@ function renderEnvironment(p) {
           <span class="spec-value">${esc(band(p.noise?.[k]))}</span>
         </div>`).join('')}
     </div>
-    <p class="chart-footnote">The highest noise zone that touches the building outline on the map. Zones are modelled outdoor
-    day-evening-night levels and start at 45 dB; they are not indoor levels. Source: City of Helsinki noise survey ${esc(survey.year || '')}
-    (CC BY 4.0)${survey.updated ? `, updated ${fmtDate(survey.updated)}` : ''}.</p>
+    <p class="chart-footnote">Modelled outdoor level at the building, not indoors. City of Helsinki noise survey ${esc(survey.year || '')} (CC BY 4.0).</p>
     <h4 class="sub-title">Nearest environmental permit facility</h4>
     ${siteHtml}
-    <p class="chart-footnote">Locations of activities in the City of Helsinki's environmental permit register (CC BY 4.0).
-    The register does not describe emissions or risk.</p>
+    <p class="chart-footnote">Location only, no emission data. City of Helsinki (CC BY 4.0).</p>
     ${renderWater(p)}
     ${renderFlood(p)}
     ${renderRescue(p)}
@@ -630,8 +627,7 @@ function renderWater(p) {
   return `
     <h4 class="sub-title">Water supply disruptions (HSY)</h4>
     ${list.length ? `<div class="specs-grid">${rows}</div>` : '<p class="muted">No disruption area touches this building.</p>'}
-    <p class="chart-footnote">Source: HSY – Helsinki Region Environmental Services, water supply disruption map
-    (Julkinen_Hairiokartta_katselu).</p>`;
+    <p class="chart-footnote">Source: HSY disruption map.</p>`;
 }
 
 // Syke flood hazard maps: the most frequent scenario whose flooded zone touches the building
@@ -649,13 +645,10 @@ function renderFlood(p) {
     return `<div class="spec-card"><span class="spec-label">${esc(label)}</span><span class="spec-value">${esc(value)}</span></div>`;
   }).join('');
   const sea = p.seaLevelPoint && DATA.seaLevelPoints?.[p.seaLevelPoint.id];
-  const maps = Object.values(DATA.floodMaps || {}).flat();
   return `
     <h4 class="sub-title">Flood hazard (Syke)</h4>
     <div class="specs-grid">${rows}</div>
-    <p class="chart-footnote">Syke maps the area flooded by floods of different rarity: floods expected on average once in
-    ${esc(DATA.floodReturnPeriods.join(', '))} years. The building counts as flooded if any part of its outline on the map lies in
-    such an area${maps.length ? `. Maps covering it: ${esc(maps.join(', '))}` : ''}. Lähde: Syke ja Elinvoimakeskukset (CC BY 4.0).</p>
+    <p class="chart-footnote">Floods from once in ${esc(DATA.floodReturnPeriods[0])} to once in ${esc(fmtNum(Math.max(...DATA.floodReturnPeriods)))} years. Lähde: Syke ja Elinvoimakeskukset (CC BY 4.0).</p>
     ${sea ? `
     <h4 class="sub-title">Sea level at the nearest shoreline point (FMI)</h4>
     ${detailGrid([
@@ -664,9 +657,7 @@ function renderFlood(p) {
       ['Estimate 2050', sea.y2050 != null && `${sea.y2050} m (N2000)`],
       ['Estimate 2100', sea.y2100 != null && `${sea.y2100} m (N2000)`]
     ])}
-    <p class="chart-footnote">Combined wave and water level estimates of the Finnish Meteorological Institute on the shoreline
-    (${sea.measured ? 'measured point' : 'value generalised along the shore'}); they describe the shore, not this building.
-    City of Helsinki WFS <em>FMI_Turvalliset_rakentamiskorkeudet_piste_2024</em> (CC BY 4.0).</p>` : ''}`;
+    <p class="chart-footnote">Water and wave height on the shore, not at this building. FMI via City of Helsinki (CC BY 4.0).</p>` : ''}`;
 }
 
 function renderRescue(p) {
@@ -678,8 +669,7 @@ function renderRescue(p) {
       ['Address', st.address],
       ['Distance', `${fmtNum(p.rescueStation.m)} m in a straight line from the building's nearest wall`]
     ]) : '<p class="muted">No rescue station in the Service Map.</p>'}
-    <p class="chart-footnote">Rescue stations in the Helsinki Service Map (service 501, CC BY 4.0). Distance in a straight line,
-    not a driving route or response time.</p>`;
+    <p class="chart-footnote">Not a driving time. Helsinki Service Map (CC BY 4.0).</p>`;
 }
 
 // STUK indoor radon by postal code; STUK leaves out areas with too few measurements
@@ -701,11 +691,12 @@ function radonHtml(postalCode) {
       </div>`;
   }).join('');
   return `
+    <p class="muted">Radioactive gas from the ground that collects indoors and raises lung cancer risk.
+    Finnish reference level: 300 Bq/m³ (Decree 1044/2018).</p>
     <div class="specs-grid">${tables}</div>
-    <p class="chart-footnote">Source: STUK – Radiation and Nuclear Safety Authority, radon measurement results by postal code
+    <p class="chart-footnote">Area figures, not this building. Source: STUK
     (<a href="${esc(DATA.radon?.workplaces?.url)}" target="_blank" rel="noopener">workplaces</a>,
-    <a href="${esc(DATA.radon?.houses?.url)}" target="_blank" rel="noopener">detached houses</a>). Area figures, not a
-    measurement of this building.</p>`;
+    <a href="${esc(DATA.radon?.houses?.url)}" target="_blank" rel="noopener">houses</a>).</p>`;
 }
 
 // Mark an environmental permit facility on the map (uses the plan overlay slot, so only one overlay shows)
