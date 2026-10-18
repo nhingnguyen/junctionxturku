@@ -1,6 +1,6 @@
 # Helsinki Decisions – Implementation Update
 
-**Ngày cập nhật:** 18/10/2026  
+**Ngày cập nhật:** 18/10/2026
 **Trạng thái:** Đã triển khai và kiểm thử end-to-end
 
 ## 1. Mục tiêu
@@ -278,4 +278,3 @@ Số lượng kết quả Decisions có thể thay đổi khi dữ liệu của 
 4. Bổ sung resolver tên housing company (`Asunto Oy ...`) thành danh sách địa chỉ/mã thửa có evidence; không tự chọn khi có nhiều candidate.
 5. Hiển thị vị trí thửa/công trình trên bản đồ.
 6. Thêm integration test có mock Helsinki Decisions API cho toàn bộ dossier output.
-

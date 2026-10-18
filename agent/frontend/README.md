@@ -1,11 +1,3 @@
-> **ADDED FOR PASILA INTELLIGENCE (map focus)**
-> `src/app/page.tsx` has one added line in `send()`, between the comment markers
-> `ADDED FOR PASILA INTELLIGENCE (map focus)`. When this UI is embedded as the Assistant panel of
-> Pasila Intelligence (the parent folder of `agent/`), it posts each reply to the parent page with
-> `window.parent?.postMessage({ type: "assistant:reply", text: data.reply }, "http://localhost:8000")`
-> so the map can focus on the buildings and areas named. The target origin is Pasila served locally
-> at `http://localhost:8000` (not `127.0.0.1`); change it for deployment. Opened on its own, nothing listens.
-
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

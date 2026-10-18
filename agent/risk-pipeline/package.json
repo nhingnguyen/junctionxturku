@@ -1,0 +1,10 @@
+{
+  "name": "risk-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node normalize-risk-data.mjs",
+    "test": "node --test normalize-risk-data.test.mjs"
+  }
+}

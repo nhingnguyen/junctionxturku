@@ -114,4 +114,3 @@ test("recognizes non-breaking hyphens used in official decision text", () => {
   assert.equal(match.matchType, "exact_parcel_id_only");
   assert.equal(match.verified, true);
 });
-

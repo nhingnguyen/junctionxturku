@@ -1,0 +1,341 @@
+{
+  "bbox_metadata": {
+    "bbox_wgs84": [
+      24.915,
+      60.191,
+      24.95,
+      60.209
+    ],
+    "bbox_epsg3879": "25495284.37,6675355.91,25497227.62,6677359.41",
+    "postal_codes": [
+      "00510",
+      "00520"
+    ],
+    "city": "Helsinki",
+    "compliance_statement": {
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "commercial_b2b_compliance": "APPROVED_FOR_COMMERCIAL_USE",
+      "scraping_used": false,
+      "authoritative_publishers": [
+        "Helsingin kaupunki (Helsinki City GIS & Building Registry)",
+        "Helsingin kaupungin pelastuslaitos (Helsinki Rescue Department)",
+        "Fingrid Oyj (National Grid Operator)",
+        "Energiavirasto (The Energy Authority)",
+        "HSY (Helsinki Region Environmental Services)",
+        "Tilastokeskus (Statistics Finland)",
+        "SYKE (Finnish Environment Institute)",
+        "STUK (Radiation and Nuclear Safety Authority)"
+      ]
+    }
+  },
+  "noise_risk_layers": {
+    "railway_noise": {
+      "layer": "avoindata:Meluselvitys_2022_Helsinki_rautatiet_Lden",
+      "feature_count_in_bbox": 10,
+      "decibel_bands": [
+        "45-50 dB (#9BFF00)"
+      ],
+      "status": "OK"
+    },
+    "street_noise": {
+      "layer": "avoindata:Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden",
+      "feature_count_in_bbox": 10,
+      "decibel_bands": [
+        "45-50 dB (#9BFF00)",
+        "70-75 dB (#FF0000)"
+      ],
+      "status": "OK"
+    },
+    "tram_noise": {
+      "layer": "avoindata:Meluselvitys_2022_Helsinki_raitiotie_Lden",
+      "feature_count_in_bbox": 10,
+      "decibel_bands": [
+        "45-50 dB (#9BFF00)"
+      ],
+      "status": "OK"
+    }
+  },
+  "flood_and_sea_level": {
+    "observed_floods_in_bbox": 0,
+    "elevation_status": "Safe (Bedrock ridge 15-30m above sea level)",
+    "climate_change_sea_level_projection_2100": "+3.27m (Terrain is > 15m)"
+  },
+  "environmental_permits": [
+    {
+      "id": "5423077",
+      "name": "Ilmalankatu 2 murskaus, välivarastointi, hyötykäyttö",
+      "street_address": "Ilmalankatu 2",
+      "postal_code": "00240 HELSINKI",
+      "activity_classification": "Kunta YSA 2.1.12f laitosmainen jätteen käsittely",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "4966208",
+      "name": "Pohjolan Liikenne Oy / Veturitien varikko ja jakelupiste",
+      "street_address": "Veturitie 25",
+      "postal_code": "00240 HELSINKI",
+      "activity_classification": "YSL 527/2014 liite 4.6 ajoneuvovarikko",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "5350916",
+      "name": "KYMP/MAKA/Keski-Pasila hyötykäyttö",
+      "street_address": null,
+      "postal_code": "00099 HELSINGIN KAUPUNKI",
+      "activity_classification": "Kunta YSA 2.1.12b maa-ainesjätteen ym. käsittely",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "4962077",
+      "name": "Elisa Oyj/Ratavartijankatu",
+      "street_address": "Ratavartijankatu 5",
+      "postal_code": "00520 HELSINKI",
+      "activity_classification": "YSL 527/2014 liite 2.1 energiantuotantolaitos",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "4961662",
+      "name": "ABC Vähänkyröntie Käpylä",
+      "street_address": "Vähänkyröntie 2",
+      "postal_code": "00610 HELSINKI",
+      "activity_classification": "YSL 527/2014 liite 2.3 jakeluasema",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "5622782",
+      "name": "Digita Data Centers Oy / Televisiokatu 2 energiantuotantolaitos",
+      "street_address": "Televisiokatu 2",
+      "postal_code": "00240 HELSINKI",
+      "activity_classification": "YSL 527/2014 liite 2.1 energiantuotantolaitos",
+      "last_updated": "2026-10-16"
+    },
+    {
+      "id": "4961770",
+      "name": "Neste Nordenskiöldinkatu",
+      "street_address": "Nordenskiöldinkatu 22",
+      "postal_code": "00240 HELSINKI",
+      "activity_classification": "YSL 527/2014 liite 2.3 jakeluasema",
+      "last_updated": "2026-10-16"
+    }
+  ],
+  "socio_economic_stability_paavo": [
+    {
+      "postal_code": "00510",
+      "area_name": "00510  Alppila - Vallila (Helsinki)",
+      "year": 2024,
+      "indicators": {
+        "tr_kuty": {
+          "name": "Households, total (TR)",
+          "value": 6528
+        },
+        "tr_ktu": {
+          "name": "Average income of households (TR)",
+          "value": 42584
+        },
+        "tr_mtu": {
+          "name": "Median income of households (TR)",
+          "value": 32456
+        },
+        "tr_pi_tul": {
+          "name": "Households belonging to the lowest income category (TR)",
+          "value": 1756
+        },
+        "tr_ke_tul": {
+          "name": "Households belonging to the middle income category (TR)",
+          "value": 3340
+        },
+        "tr_hy_tul": {
+          "name": "Households belonging to the highest income category (TR)",
+          "value": 1432
+        }
+      }
+    },
+    {
+      "postal_code": "00520",
+      "area_name": "00520  Itä- ja Keski-Pasila (Helsinki)",
+      "year": 2024,
+      "indicators": {
+        "tr_kuty": {
+          "name": "Households, total (TR)",
+          "value": 4861
+        },
+        "tr_ktu": {
+          "name": "Average income of households (TR)",
+          "value": 51629
+        },
+        "tr_mtu": {
+          "name": "Median income of households (TR)",
+          "value": 41300
+        },
+        "tr_pi_tul": {
+          "name": "Households belonging to the lowest income category (TR)",
+          "value": 982
+        },
+        "tr_ke_tul": {
+          "name": "Households belonging to the middle income category (TR)",
+          "value": 2498
+        },
+        "tr_hy_tul": {
+          "name": "Households belonging to the highest income category (TR)",
+          "value": 1381
+        }
+      }
+    }
+  ],
+  "indoor_radon_exposure_stuk": {
+    "00510": {
+      "area_name": "Alppila - Vallila",
+      "median_bq_m3": 48,
+      "average_bq_m3": 62,
+      "pct_exceeding_300_bq_m3": 1.2,
+      "risk_level": "VERY_LOW",
+      "geological_context": "Clay overlying granitic bedrock; modern multi-storey buildings have mechanical ventilation."
+    },
+    "00520": {
+      "area_name": "Itä- ja Keski-Pasila",
+      "median_bq_m3": 42,
+      "average_bq_m3": 54,
+      "pct_exceeding_300_bq_m3": 0.8,
+      "risk_level": "VERY_LOW",
+      "geological_context": "Elevated rocky terrain / bedrock cuts with concrete foundation pads; high-rise buildings."
+    }
+  },
+  "fire_and_rescue_safety": {
+    "total_buildings_in_bbox": 872,
+    "source": "City of Helsinki Building Control Registry (RAVA WFS)",
+    "license": "Helsinki Open Data License (CC BY 4.0)",
+    "geoscope": "Individual Building & Cadastral Parcel Level",
+    "structural_fire_materials": {
+      "Concrete (Betoni) - High Fire Resistance (Class P1)": 428,
+      "Wood (Puu) - Timber Structure (Class P3 / Elevated Fire Watch)": 85,
+      "Brick (Tiili) - High Fire Resistance (Class P1)": 99,
+      "Code Unknown": 243,
+      "Steel (Teräs) - Fire-Protected Metal Frame": 14,
+      "Other / Composite Structure": 3
+    },
+    "heating_fire_hazards": {
+      "District Heating (Kaukolämpö) - Zero on-site fire ignition source": 541,
+      "Oil Heating - On-site combustible fuel storage": 21,
+      "Electric Heating - Standard low-fire hazard": 9,
+      "Code Unknown": 245,
+      "Geothermal / Heat Pump - Low fire hazard": 50,
+      "Natural Gas - Pressurized fuel hazard": 6
+    },
+    "sample_parcels": [
+      {
+        "parcel_id": "091-017-0077-0002",
+        "address": "Pasilanraitio 9b",
+        "postal_code": "00240",
+        "fire_material": "Concrete (Betoni) - High Fire Resistance (Class P1)",
+        "heating_fire_risk": "District Heating (Kaukolämpö) - Zero on-site fire ignition source",
+        "floors": 7,
+        "construction_year": "1983"
+      },
+      {
+        "parcel_id": "091-017-0077-0003",
+        "address": "Pasilanraitio 9a",
+        "postal_code": "00240",
+        "fire_material": "Concrete (Betoni) - High Fire Resistance (Class P1)",
+        "heating_fire_risk": "District Heating (Kaukolämpö) - Zero on-site fire ignition source",
+        "floors": 7,
+        "construction_year": "1983"
+      },
+      {
+        "parcel_id": "091-017-0105-0007",
+        "address": "Tenderinlenkki 8",
+        "postal_code": "00520",
+        "fire_material": "Concrete (Betoni) - High Fire Resistance (Class P1)",
+        "heating_fire_risk": "District Heating (Kaukolämpö) - Zero on-site fire ignition source",
+        "floors": 9,
+        "construction_year": "2021"
+      },
+      {
+        "parcel_id": "091-022-0399-0004",
+        "address": "Aleksis Kiven katu 47",
+        "postal_code": "00520",
+        "fire_material": "Concrete (Betoni) - High Fire Resistance (Class P1)",
+        "heating_fire_risk": "District Heating (Kaukolämpö) - Zero on-site fire ignition source",
+        "floors": 7,
+        "construction_year": "2016"
+      },
+      {
+        "parcel_id": "091-022-0399-0003",
+        "address": "Aleksis Kiven katu 43",
+        "postal_code": "00520",
+        "fire_material": "Concrete (Betoni) - High Fire Resistance (Class P1)",
+        "heating_fire_risk": "District Heating (Kaukolämpö) - Zero on-site fire ignition source",
+        "floors": 6,
+        "construction_year": "2016"
+      }
+    ],
+    "rescue_coverage_standards": {
+      "authority": "Helsingin kaupungin pelastuslaitos (City of Helsinki Rescue Department)",
+      "operational_risk_class": "Riskiluokka I (Dense Urban Core - Highest Priority)",
+      "mandated_first_engine_response_time": "< 6 minutes (50% target), < 10 minutes (90% target)",
+      "primary_rescue_station": "Kallion pelastusasema (Agricolankatu 15, ~1.5 km)",
+      "secondary_rescue_station": "Keskuspelastusasema / Pasila rescue units",
+      "statfin_arson_incidence_trend": "Zero systemic arson patterns recorded in 00510 / 00520"
+    }
+  },
+  "utility_disruptions": {
+    "electricity_national_grid_fingrid": {
+      "operator": "Fingrid Oyj (National Transmission System Operator)",
+      "api_portal": "https://data.fingrid.fi",
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "commercial_use_allowed": true,
+      "geoscope": "National Grid Nodes & Regional Substations",
+      "monitored_dataset_ids": {
+        "dataset_205": "Disturbances in the Main Grid (Kantaverkon häiriöt)",
+        "dataset_176": "Power System State and Frequency Deviations",
+        "dataset_177": "Reserve Capacity Adequacy"
+      },
+      "system_status": "NORMAL_OPERATIONAL_STATE (Häiriötön tila)",
+      "developer_quota": "Free Open Data Starter Key (10,000 calls/day)"
+    },
+    "electricity_local_distribution_helen": {
+      "distribution_operator": "Helen Sähköverkko Oy",
+      "regulatory_authority": "Energiavirasto (The Energy Authority of Finland)",
+      "license": "Official Regulatory Open Data (CC BY 4.0)",
+      "geoscope": "Helsinki Municipal Area & Individual Parcel Grid Connection",
+      "underground_cable_share_pct": 100,
+      "saidi_average_outage_minutes_per_customer_year": 1.8,
+      "weather_vulnerability_rating": "ZERO_STORM_RISK (100% Maakaapeloitu maakaapeliverkko)",
+      "grid_reliability_rating": "EXCELLENT (Ranked among top 5 in Europe)"
+    },
+    "water_network_hsy": {
+      "authority": "HSY (Helsingin seudun ympäristöpalvelut)",
+      "license": "CC BY 4.0 Open Data",
+      "active_disruptions_intersecting_bbox": 19,
+      "sample_disruptions": [
+        {
+          "id": 1887,
+          "area_name": "00520 Itä-Pasila",
+          "start_time": "2026-06-11 08:00",
+          "end_time": "2026-06-11 13:00",
+          "affected_residents": 276,
+          "type_code": 9,
+          "has_geometry_polygon": true
+        },
+        {
+          "id": 2602,
+          "area_name": "00510 Etu-Vallila - Alppila",
+          "start_time": "2026-05-07 08:30",
+          "end_time": "2026-05-07 13:00",
+          "affected_residents": 0,
+          "type_code": 9,
+          "has_geometry_polygon": true
+        },
+        {
+          "id": 2442,
+          "area_name": "00240 Länsi-Pasila",
+          "start_time": "2026-01-13 08:00",
+          "end_time": "2026-01-13 15:00",
+          "affected_residents": 0,
+          "type_code": 9,
+          "has_geometry_polygon": true
+        }
+      ],
+      "geoscope": "Building Cluster GIS Polygons (Exact parcel intersection)"
+    }
+  }
+}
