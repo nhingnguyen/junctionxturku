@@ -15,6 +15,13 @@
     "9": "Maalämpö tms.",
     "10": "Muu"
   },
+  "RA_LAMMITYSTAPA": {
+    "1": "Vesikeskuslämmitys",
+    "2": "Ilmakeskuslämmitys",
+    "3": "Suora sähkölämmitys",
+    "4": "Uunilämmitys",
+    "5": "Ei kiinteää lämmityslaitetta"
+  },
   "RA_KANTRAKAINE": {
     "1": "Betoni tai kevytbetoni",
     "2": "Tiili",

@@ -43,16 +43,19 @@ A web map of the Pasila district (Helsinki). Click a building to see its details
 | Shown in the app | Source | API / layer | Field(s) |
 |---|---|---|---|
 | **Building polygon (footprint)** | City of Helsinki | WFS `avoindata:Rakennukset_alue_rekisteritiedot` | `geometry` (Polygon) |
-| Address, postal code | City of Helsinki | same layer | `katunimi_suomi`, `osoitenumero`, `postinumero` |
-| Secondary addresses (other entrances) | Ryhti (Syke) | OGC API `open_address` | `address_fin`, `postal_code` |
-| VTJ-PRT, property ID | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `vtj_prt`, `c_kiinteistotunnus` |
+| Address, postal code | Ryhti (Syke); fallback City of Helsinki | OGC API `open_address`; `Rakennukset_alue_rekisteritiedot` | `address_fin`, `postal_code` (first address = main address); the Helsinki register address `katunimi_suomi` + `osoitenumero` is kept as another address when it differs |
+| Secondary addresses (other entrances) | Ryhti (Syke) | OGC API `open_address` | further `address_fin` values of the building |
+| VTJ-PRT, property ID | City of Helsinki; Ryhti (Syke) | `Rakennukset_alue_rekisteritiedot`, `open_building` | `vtj_prt`; property ID from Ryhti `property_identifier`, fallback Helsinki `c_kiinteistotunnus` (the Helsinki register still names 091-432-0001-0026 for four buildings at Auroranportti 2/4, which Ryhti and the plan units place on 091-018-9903/9904-0002) |
+| Distance to the official address point | City of Helsinki | WFS `Osoiteluettelo_piste_rekisteritiedot` | `katuosoite`, point geometry; metres from the footprints to the point of each registered address. Some addresses are registered for several buildings (e.g. *Veturitori 3*: an office building 9 m and a transformer 356 m from the point); search lists them nearest first and shows the distance |
 | Building class (e.g. *Residential blocks of flats*) | City of Helsinki + Statistics Finland | same layer | `c_rakennusluokka` → Classification of Buildings 2018 English label (Statistics Finland classifications API); fallback `tyyppi` |
-| Completion date, storeys, apartments, floor area, total area, volume, elevator | City of Helsinki (fallback: Ryhti) | `Rakennukset_alue_rekisteritiedot` | `c_valmpvm`, `i_kerrlkm`, `i_asuinhuoneistojen_lkm`, `i_kerrosala`, `i_kokala`, `i_raktilav`, `c_hissi` |
-| Heating energy source, load-bearing material, facade | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `c_poltaine`, `c_rakeaine`, `c_julkisivu` → Finnish labels from the dataset's [code explanations](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf) (stored in `scripts/helsinki_building_codes.json`) |
+| Completion date, storeys, apartments, floor area, total area, volume | Ryhti (fallback: City of Helsinki) | `open_building`; `Rakennukset_alue_rekisteritiedot` | `completion_date`, `number_of_storeys`, `apartment_count`, `gross_floor_area`, `total_area`, `volume`; Ryhti's 0 for storeys/areas/volume means unknown and falls back to `c_valmpvm`, `i_kerrlkm`, `i_asuinhuoneistojen_lkm`, `i_kerrosala`, `i_kokala`, `i_raktilav` |
+| Elevator | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `c_hissi` (Ryhti publishes no elevator field) |
+| Heating energy source, heating method, load-bearing material, facade | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `c_poltaine`, `c_lammtapa`, `c_rakeaine`, `c_julkisivu` → Finnish labels from the dataset's [code explanations](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf) (stored in `scripts/helsinki_building_codes.json`) |
+| Network connections | City of Helsinki | `Rakennukset_alue_rekisteritiedot` | `c_vesilii`, `c_viemlii`, `c_sahkolii`: listed only when the register flag is `x`; an empty flag is shown as not recorded, never as "no connection" |
 | Protection in detailed plan | City of Helsinki | WFS `Asemakaavoissa_suojellut_rakennukset_alue` | `s_merk`, `kaava` (joined on `ratu = pys_raknro`) |
 | **Permit timeline** – click a permit for details | Ryhti + Syke data model | `open_permit_building` | `construction_action_type` (type of work, labelled from `sykefi/rakennuskohteet`), `decision_date`, `start_date`, `completion_date`, `expiry_date`, `construction_to_be_completed_by_extension` (extension decision ID), `permanent_permit_identifier`, `dvv_permit_identifier` + building data stated in the permit (`number_of_storeys`, `apartment_count`, areas, `volume`). The app shows these values as published and does not infer a status |
 | **Price history (€/m², sales)** | Statistics Finland | PxWeb `StatFin/ashi/13mu.px` | `keskihinta_aritm_nw`, `lkm_julk20` by postal code |
-| **Area statistics** | Statistics Finland (Paavo) | PxWeb `Postinumeroalueittainen_avoin_tieto/uusin/12f7.px` | `he_vakiy`, `hr_mtu`, `te_omis_as`, `ra_asunn`, … |
+| **Area statistics** | Statistics Finland (Paavo) | PxWeb `Postinumeroalueittainen_avoin_tieto/uusin/12f7.px` | `he_vakiy`, `hr_mtu`, `tr_ktu`, `tr_mtu`, `te_omis_as`, `ra_asunn`, … |
 | **Plot zoning** (permitted use, building rights, plot area) | City of Helsinki | WFS `avoindata:Kaavayksikot` | `kaavayksikkotunnus` (= property ID), `kayttotarkoitusluokka`, `rakennusoikeus`, `rekisteriala`, `kaavatunnus`; joined only on the building's property ID, no location-based guessing (543/616 buildings) |
 | **Detailed plans (asemakaava) covering the building** – click a plan for details and its boundary on the map | City of Helsinki | WFS `Kaavahakemisto_alue_kaava_voimassa`, `…_vireilla` | `kaavatunnus`, `luokka`, `hyvaksymispvm`, `vahvistamispvm`, `lainvoimaisuuspvm`, `voimaantulopvm`, `pintaala`, `muokkauspvm`, `geometry` |
 | **Events nearby** | City of Helsinki | Linked Events API | `name.en` (fallback `fi`), `start_time`, `location.name.en`, `location.position` |
@@ -198,7 +201,7 @@ A building permit (*rakennuslupa*) is the municipality's decision allowing const
 | Value | Label source | Licence |
 |---|---|---|
 | Building class (`c_rakennusluokka`, e.g. `0121`) | Statistics Finland classifications API `https://data.stat.fi/api/classifications/v2/classifications/rakennus_1_20180712/classificationItems?lang=en` → *Residential blocks of flats* | CC BY 4.0 |
-| Heating energy source, load-bearing material, facade (`c_poltaine`, `c_rakeaine`, `c_julkisivu`) | Code explanations published with the Helsinki building dataset ([PDF](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf)), transcribed into `scripts/helsinki_building_codes.json` (Finnish only) | CC BY 4.0 (part of `helsingin-rakennukset`) |
+| Heating energy source, heating method, load-bearing material, facade (`c_poltaine`, `c_lammtapa`, `c_rakeaine`, `c_julkisivu`) | Code explanations published with the Helsinki building dataset ([PDF](https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf)), transcribed into `scripts/helsinki_building_codes.json` (Finnish only) | CC BY 4.0 (part of `helsingin-rakennukset`) |
 | Permit type (`construction_action_type`, codes 01–05) | Syke data model [sykefi/rakennuskohteet](https://github.com/sykefi/rakennuskohteet) (LICENSE: CC BY 4.0), transcribed into `scripts/ryhti_permit_codes.json` | CC BY 4.0 |
 | Other Ryhti code URIs (`main_purpose`, `heating_energy_source`, materials, `status_of_construction_action`, `construction_method`) | koodistot.suomi.fi | **No published licence → not used** |
 
@@ -278,13 +281,14 @@ POST https://pxdata.stat.fi/PxWeb/api/v1/en/Postinumeroalueittainen_avoin_tieto/
     { "code": "postinumeroalue_4_20260101", "selection": { "filter": "item", "values": ["00520", …] } },
     { "code": "timeperiod_y", "selection": { "filter": "item", "values": ["2024"] } },
     { "code": "contentscode", "selection": { "filter": "item",
-      "values": ["he_vakiy","he_kika","hr_mtu","te_taly","te_takk","te_as_valj","te_yks","te_laps",
+      "values": ["he_vakiy","he_kika","hr_mtu","tr_kuty","tr_ktu","tr_mtu","tr_pi_tul","tr_ke_tul","tr_hy_tul","te_taly","te_takk","te_as_valj","te_yks","te_laps",
                  "te_omis_as","te_vuok_as","ra_asunn","ra_as_kpa","ra_kt_as","ra_raky"] } } ],
   "response": { "format": "json-stat2" } }
 ```
 **Response:** json-stat2 like 3.8. After parsing, 00520 gives:
 ```json
-{ "he_vakiy": 8732, "he_kika": 39, "hr_mtu": 29589, "te_taly": 4861, "te_takk": 1.8, "te_as_valj": 30.7,
+{ "he_vakiy": 8732, "he_kika": 39, "hr_mtu": 29589,
+  "tr_kuty": 4861, "tr_ktu": 51629, "tr_mtu": 41300, "tr_pi_tul": 982, "tr_ke_tul": 2498, "tr_hy_tul": 1381, "te_taly": 4861, "te_takk": 1.8, "te_as_valj": 30.7,
   "te_yks": 2509, "te_laps": 734, "te_omis_as": 2249, "te_vuok_as": 2600,
   "ra_raky": 220, "ra_asunn": 5565, "ra_as_kpa": 53.2, "ra_kt_as": 5545 }
 ```
@@ -404,7 +408,7 @@ The build prints every Finnish value it could not resolve to an official English
 
 | Kind | Examples | Why |
 |---|---|---|
-| Heating energy source, load-bearing material, facade | Kauko- tai aluelämpö, Betoni tai kevytbetoni, Tiili, … | Helsinki's code explanations are Finnish only |
+| Heating energy source, heating method, load-bearing material, facade | Kauko- tai aluelämpö, Vesikeskuslämmitys, Betoni tai kevytbetoni, Tiili, … | Helsinki's code explanations are Finnish only |
 | Plot permitted use | Asuinkerrostalot, Keskustatoiminnot, … | Helsinki WFS publishes Finnish only |
 | Plan status, approving body | Voimassa, Vireillä, kylk | Helsinki WFS publishes Finnish only |
 | Building class fallback | Muuntamo, Toimistorakennus, … | footprints without a `c_rakennusluokka` code |
@@ -425,16 +429,29 @@ The build prints every Finnish value it could not resolve to an official English
 | Ryhti `open_building`, `open_address`, `open_permit_building` | Building points (verification), addresses, permits | CC BY 4.0 | [Syke metadata: Ryhti rakennustiedot](https://ckan.ymparisto.fi/dataset/rakennetun-ympariston-tietojarjestelman-rakennustiedot) – *"Open data on completed buildings, project buildings, and addresses … The open data content of the dataset is part of SYKE's open data (CC BY 4.0)"*; [Syke terms](https://www.syke.fi/fi/ymparistotieto/kayttolupa-ja-vastuut) | Lähde: Syke, Ryhti |
 | StatFin `ashi/13mu`, Paavo `12f7` (PxWeb) | Prices, area statistics | CC BY 4.0 | [Statistics Finland: Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces), [Terms of use](https://stat.fi/en/about-us/get-to-know-statistics-finland/legislation/terms-of-use); Paavo also listed as CC BY 4.0 on [research.fi](https://research.fi/en/results/dataset/ff0c88e8-5d2c-4e8f-85ef-96d6a951c552) | © Tilastokeskus |
 | Statistics Finland classifications API `rakennus_1_20180712` | Building class (fi + en) | CC BY 4.0 | [Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces) (lists the classifications API under the open-data licence) | © Tilastokeskus |
-| Helsinki building register code explanations (PDF) | Energy source, material, facade labels | CC BY 4.0 | Linked from [HRI: helsingin-rakennukset](https://hri.fi/data/fi/dataset/helsingin-rakennukset) | © Helsingin kaupunki |
+| Helsinki building register code explanations (PDF) | Energy source, heating method, material, facade labels | CC BY 4.0 | Linked from [HRI: helsingin-rakennukset](https://hri.fi/data/fi/dataset/helsingin-rakennukset) | © Helsingin kaupunki |
 | Syke GitHub `sykefi/rakennuskohteet` | Permit type labels (codes 01–05) | CC BY 4.0 | [LICENSE](https://github.com/sykefi/rakennuskohteet/blob/HEAD/LICENSE) in the repository | Syke |
 | Helsinki WFS `Meluselvitys_2022_Helsinki_*_Lden` | Traffic noise zones | CC BY 4.0 | [HRI: helsingin-kaupungin-meluselvitys-2017](https://hri.fi/data/fi/dataset/helsingin-kaupungin-meluselvitys-2017) (the city's noise survey dataset; the 2022 layers are served from the same WFS) | © Helsingin kaupunki |
 | Helsinki WFS `Ymparistolupakohteet` | Environmental permit facilities | CC BY 4.0 | [HRI: helsingin-ymparistolupakohteet](https://hri.fi/data/fi/dataset/helsingin-ymparistolupakohteet) | © Helsingin kaupunki |
+| Helsinki WFS `Osoiteluettelo_piste_rekisteritiedot` | Official address points (search order for shared addresses) | CC BY 4.0 | [HRI: helsingin-osoiteluettelo](https://hri.fi/data/fi/dataset/helsingin-osoiteluettelo) | © Helsingin kaupunki |
 | Linked Events | Events | CC BY 4.0 | [HRI: linked-events-tapahtumarajapinta](https://hri.fi/data/fi/dataset/linked-events-tapahtumarajapinta) | City of Helsinki |
+| Syke WFS `inspire_nz` flood hazard layers | Flood hazard zones, mapped areas | CC BY 4.0 | [Syke metadata](https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-flood-hazard-zones-basic-scenarios) | Lähde: Syke ja Elinvoimakeskukset |
+| Helsinki WFS `FMI_Turvalliset_rakentamiskorkeudet_piste_2024` | Sea level estimates on the shoreline | CC BY 4.0 | [HRI: turvalliset-rakentamiskorkeudet-…](https://hri.fi/data/fi/dataset/turvalliset-rakentamiskorkeudet-ja-suurin-arvioitu-merkitseva-aallonkorkeus-helsingissa) | © Helsingin kaupunki, Ilmatieteen laitos |
+| Service Map API (api.hel.fi/servicemap) | Rescue stations | CC BY 4.0 | [HRI: paakaupunkiseudun-palvelukartan-rest-rajapinta](https://hri.fi/data/fi/dataset/paakaupunkiseudun-palvelukartan-rest-rajapinta) | City of Helsinki |
+| Statistics Finland WFS `postialue:pno_<year>` | Postal code areas touching the BBOX | CC BY 4.0 | [Statistics Finland: Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces) | © Tilastokeskus |
+| STUK radon tables by postal code (web pages) | Indoor radon | **not stated** – used on request | [workplaces](https://stuk.fi/hae-tyopaikkojen-radonmittaustuloksia-postinumeroalueittain), [detached houses](https://stuk.fi/pientalojen-radonpitoisuudet-postinumeroalueittain) | Lähde: STUK |
 | OpenStreetMap tiles | Default base map | ODbL + Tile Usage Policy | [OSM copyright](https://www.openstreetmap.org/copyright), [Tile policy](https://operations.osmfoundation.org/policies/tiles/) | © OpenStreetMap contributors |
 
-**Rules:** a source is used only if its licence is stated by the publisher, and the app shows published values without drawing its own conclusions (no inferred statuses, no verification verdicts, no good/bad colouring; plots are linked only by ID). **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit status labels, construction method or Ryhti's purpose label (permit types come from Syke's CC BY data model instead). Also not used: HSY's water-supply disruption map (ArcGIS `Julkinen_Hairiokartta_katselu`), which publishes no licence and whose records contain HSY staff e-mail addresses.
+**Rules:** a source is used only if its licence is stated by the publisher, and the app shows published values without drawing its own conclusions (no inferred statuses, no verification verdicts, no good/bad colouring; plots are linked only by ID). **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit status labels, construction method or Ryhti's purpose label (permit types come from Syke's CC BY data model instead). HSY's water-supply disruption map (ArcGIS `Julkinen_Hairiokartta_katselu`) publishes no licence; it was added on request. Only `OBJECTID, tyyppi, alkuaika, loppuaika, nimi, asukkaat` are requested, so no contact fields (staff e-mail addresses) are downloaded. A building lists every disruption area its footprint touches.
 
-**Evaluated and rejected (no published per-building data):** flood depth, radon, fire class, rescue response times, power-grid status and arson risk. Values for these were proposed as fixed constants or inferred from building materials; they are not shown. Flood could be added from SYKE's official flood hazard maps if they are actually queried.
+**Hazards (Environment tab), all fetched when the data is built – no fixed values:**
+- **Flood hazard** – Syke WFS `inspire_nz:NZ.Tulvavaaravyohykkeet_{Meritulva,Vesistotulva}_1_{2…1000}a` (zones with a water depth, `syvsuojluokka_id` 1–98) and `NZ.Tulvavaarakartoitetut_alueet_*` (mapped areas). Per building: the most frequent scenario whose zone touches a footprint and the deepest depth class touched, or "outside every mapped zone" / "not covered by a flood hazard map". In the current build every building is inside the Helsinki sea-flood map and outside all zones up to 1/1000 a; no river flood map covers the area. Licence: CC BY 4.0, "Lähde: Syke ja Elinvoimakeskukset" ([Syke metadata](https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-flood-hazard-zones-basic-scenarios)).
+- **Sea level at the nearest shoreline point** – City of Helsinki WFS `FMI_Turvalliset_rakentamiskorkeudet_piste_2024` (FMI's combined wave and water level estimates for 2020/2050/2100, N2000), the point nearest to the footprint and its distance (0.8–2.5 km in the current build). It describes the shore, not the building. CC BY 4.0 ([HRI](https://hri.fi/data/fi/dataset/turvalliset-rakentamiskorkeudet-ja-suurin-arvioitu-merkitseva-aallonkorkeus-helsingissa)).
+- **Nearest rescue station** – Service Map API, service 501 "rescue stations" (units named *…asema*), straight-line distance from the footprint; no response time is claimed. CC BY 4.0 ([HRI](https://hri.fi/data/fi/dataset/paakaupunkiseudun-palvelukartan-rest-rajapinta)).
+- **Indoor radon by postal code** – STUK's two tables (workplaces 2014–2023, at least 5 measured; detached houses 1980–2023, at least 10 measured), read from the tables on [stuk.fi](https://stuk.fi/hae-tyopaikkojen-radonmittaustuloksia-postinumeroalueittain) and [stuk.fi](https://stuk.fi/pientalojen-radonpitoisuudet-postinumeroalueittain). Postal codes STUK does not publish are shown as "not published". The pages state no licence (STUK's CC BY 4.0 covers only its open-data service); used on request.
+- **Removed** (no open source): rescue risk class and response targets, power-grid figures (Fingrid/Helen/SAIDI), fire class and ignition hazard mapped from register codes, LOW/MODERATE/HIGH noise labels. The earlier `scripts/risk_profile_values.json` held fixed values typed into the planned risk pipeline (its radon figures for 00510/00520 do not match STUK's tables) and is deleted.
+
+**Postal code areas:** every Statistics Finland postal code area touching the BBOX (WFS `geo.stat.fi/geoserver/postialue`, `pno_<year>`, CC BY 4.0) – currently 00240, 00250, 00270, 00280, 00310, 00320, 00510, 00520, 00550, 00610 – gets Paavo statistics, prices and radon; the Area and Prices tabs let the user switch between them.
 
 Attribution is shown in the map corner and in the *Sources & Licences* dialog.
 
@@ -452,7 +469,7 @@ Scraping Etuovi, Vuokraovi or Oikotie and attaching listings to parcels was eval
 Listings also contain personal data (agents, sellers), and the listing databases are protected as catalogues/databases under the Finnish Copyright Act.
 
 **What the app does instead (legal):**
-- **Address resolver** – a pasted listing address such as `Fredikanterassi 3 B 14, 00520 Helsinki` resolves to the right building. It strips staircase/apartment parts, keeps house letters (`19a`), expands ranges (`Porvoonkatu 20-22`) and uses secondary entrances from Ryhti.
+- **Address resolver** – a pasted listing address such as `Fredikanterassi 3 B 14, 00520 Helsinki` resolves to the right building. It strips staircase/apartment parts, keeps house letters (`19a`), expands ranges (`Porvoonkatu 20-22`) and uses secondary entrances from Ryhti. When an address is registered for several buildings, they are listed by distance to the city's official address point.
 - **Parcel summary** – all buildings on the same property (kiinteistötunnus), their total floor area against the plot's building rights.
 - **Asking-price check** – the user types the price and size of a listing they are viewing; the app compares €/m² with the StatFin average for the postal code and flat size. Nothing is sent or stored.
 - A real listings feed would need a written data agreement with Alma Media or Oikotie (their partner interfaces are for business customers).

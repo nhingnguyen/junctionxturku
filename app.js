@@ -21,7 +21,8 @@ const PARCELS = BUILDINGS.reduce((map, p) => {
 }, {});
 
 // Paavo fields shown in the "Area" tab; labels come from the English PxWeb API
-const PAAVO_FIELDS = ['he_vakiy', 'he_kika', 'hr_mtu', 'te_taly', 'te_takk', 'te_as_valj', 'te_yks',
+const PAAVO_FIELDS = ['he_vakiy', 'he_kika', 'hr_mtu', 'tr_kuty', 'tr_ktu', 'tr_mtu', 'tr_pi_tul', 'tr_ke_tul', 'tr_hy_tul',
+                      'te_taly', 'te_takk', 'te_as_valj', 'te_yks',
                       'te_laps', 'te_omis_as', 'te_vuok_as', 'ra_asunn', 'ra_as_kpa', 'ra_kt_as', 'ra_raky'];
 
 const STYLE = {
@@ -81,33 +82,39 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
 
 const normAddr = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
-// Normalized address -> ids of every building carrying it (the first one is the search match)
+// Normalized address -> ids of every building carrying it. The registers give some addresses to several
+// buildings, so they are ordered by distance to the official address point: the first one is the search match.
 function buildAddressIndex() {
   const index = new Map();
-  const add = (key, id) => {
-    const ids = index.get(key) || index.set(key, []).get(key);
-    if (!ids.includes(id)) ids.push(id);
+  const add = (key, id, m) => {
+    const hits = index.get(key) || index.set(key, []).get(key);
+    if (!hits.some(h => h.id === id)) hits.push({ id, m });
   };
   BUILDINGS.forEach(p => {
     [p.address, ...(p.otherAddresses || [])].filter(Boolean).forEach(a => {
       const n = normAddr(a);
-      add(n, p.id);
+      const m = p.addressPointM?.[a] ?? Infinity;
+      add(n, p.id, m);
       // Ranges such as "Porvoonkatu 20-22" cover each number on that side of the street
-      const m = n.match(/^(.*?) (\d+)\s*-\s*(\d+)$/);
-      if (m) {
-        const [, street, from, to] = m;
+      const r = n.match(/^(.*?) (\d+)\s*-\s*(\d+)$/);
+      if (r) {
+        const [, street, from, to] = r;
         const step = (to - from) % 2 === 0 ? 2 : 1;
-        for (let k = Number(from); k <= Number(to); k += step) add(`${street} ${k}`, p.id);
+        for (let k = Number(from); k <= Number(to); k += step) add(`${street} ${k}`, p.id, m);
       }
     });
   });
-  return index;
+  return new Map([...index].map(([key, hits]) => [key, hits.sort((a, b) => a.m - b.m).map(h => h.id)]));
 }
 const ADDRESS_INDEX = buildAddressIndex();
 
 // A letter after the number is either part of the address ("19a", "19 a") or a staircase ("19 B 2").
 // Finnish listings write staircases in capitals after a space, so that case tries the plain number first.
+// Returns the address key; ADDRESS_INDEX.get(key) lists its buildings, nearest to the address point first.
 function resolveAddress(text) {
+  // Registered addresses such as "Nordenskiöldinkatu 20 Rak 5" (Ryhti) name one building as written
+  const full = normAddr(text.split(',')[0]);
+  if (ADDRESS_INDEX.has(full)) return full;
   const m = text.split(',')[0].trim().match(/^(\D+?)\s*(\d+)(?:(\s*)([A-Za-zÅÄÖåäö])(?![A-Za-zÅÄÖåäö]))?/);
   if (!m) return null;
   const [, street, num, gap, letter] = m;
@@ -115,9 +122,12 @@ function resolveAddress(text) {
   const withLetter = letter ? `${base}${letter.toLowerCase()}` : null;
   const staircase = letter && gap && letter === letter.toUpperCase();
   const order = staircase ? [base, withLetter] : [withLetter, base];
-  for (const key of order) if (key && ADDRESS_INDEX.has(key)) return ADDRESS_INDEX.get(key)[0];
-  return null;
+  return order.find(key => key && ADDRESS_INDEX.has(key)) || null;
 }
+
+// Metres from a building to the official address point of one of its registered addresses
+const addressPointM = (p, key) =>
+  Object.entries(p.addressPointM || {}).find(([a]) => normAddr(a) === key)?.[1];
 
 // ---------- Map ----------
 
@@ -247,8 +257,11 @@ function selectBuilding(id) {
   map.flyToBounds(bounds, { ...mapPadding(true), maxZoom: 18, duration: 0.6 });
 
   document.getElementById('buildingTitle').textContent = titleOf(p);
+  // An address registered for several buildings: say how far this one is from the official address point
+  const sharedM = p.address && ADDRESS_INDEX.get(normAddr(p.address))?.length > 1 ? addressPointM(p, normAddr(p.address)) : undefined;
   document.getElementById('buildingPostal').innerHTML =
     `<i class="fa-solid fa-map-pin"></i> ${esc(p.postalCode || '—')} Helsinki` +
+    (sharedM !== undefined ? ` <span class="muted">• ${fmtNum(sharedM)} m from the official address point</span>` : '') +
     (p.otherAddresses ? ` <span class="muted">• also ${esc(p.otherAddresses.join(', '))}</span>` : '');
   document.getElementById('heroPurpose').textContent = p.class || '—';
   document.getElementById('heroYear').textContent = `Completed ${completedYear(p) || '?'}`;
@@ -257,12 +270,8 @@ function selectBuilding(id) {
   document.getElementById('valPropertyId').textContent = p.propertyId || '—';
 
   renderSpecs(p);
-  renderArea(p.postalCode);
   renderTimeline(p);
-  selectedPostal = p.postalCode;
-  chartPostal = undefined;
-  refreshPriceChart();
-  updatePriceCheck();
+  selectPostal(p.postalCode);
   renderPlansAndEvents(p, bounds.getCenter());
   renderEnvironment(p);
 
@@ -279,6 +288,8 @@ function renderSpecs(p) {
     ['Volume', p.volume ? `${fmtNum(p.volume)} m³` : '—'],
     ['Building class', p.class || '—'],
     ['Heating energy source', p.energy || '—'],
+    ['Heating method', p.heating || '—'],
+    ['Network connections (register)', p.connections?.length ? p.connections.join(', ') : '—'],
     ['Load-bearing material', p.structure || '—'],
     ['Facade material', p.facade || '—'],
     ['Elevator', p.elevator == null ? '—' : p.elevator ? 'Yes' : 'No'],
@@ -292,11 +303,27 @@ function renderSpecs(p) {
 
 }
 
+// Postal code areas touching the data area (Statistics Finland), selectable in the Area and Prices tabs.
+// Opening a building selects its registered postal code.
+function selectPostal(code) {
+  selectedPostal = code;
+  document.querySelectorAll('.postal-select').forEach(sel => {
+    const codes = [...new Set([...DATA.postalAreas.codes, ...(code ? [code] : [])])].sort();
+    sel.innerHTML = codes.map(c => `<option value="${esc(c)}"${c === code ? ' selected' : ''}>${esc(c)} ${esc(DATA.paavo.byPostal[c]?.name || '')}</option>`).join('');
+    if (!code) sel.insertAdjacentHTML('afterbegin', '<option value="" selected>—</option>');
+  });
+  renderArea(code);
+  chartPostal = undefined;
+  refreshPriceChart();
+  updatePriceCheck();
+}
+
 function renderArea(postalCode) {
   const container = document.getElementById('areaContainer');
   const area = DATA.paavo.byPostal[postalCode];
+  const radon = `<h4 class="sub-title">Indoor radon</h4>${radonHtml(postalCode)}`;
   if (!area) {
-    container.innerHTML = `<p class="muted">No Paavo statistics for postal code ${esc(postalCode || '—')}.</p>`;
+    container.innerHTML = `<p class="muted">No Paavo statistics for postal code ${esc(postalCode || '—')}.</p>${radon}`;
     return;
   }
   const v = area.values;
@@ -315,7 +342,8 @@ function renderArea(postalCode) {
           <span class="spec-value">${fmtNum(v[k])}</span>
         </div>`).join('')}
     </div>
-    <p class="chart-footnote">Source: Statistics Finland, Paavo – open data by postal code area (CC BY 4.0).</p>`;
+    <p class="chart-footnote">Source: Statistics Finland, Paavo – open data by postal code area (CC BY 4.0).</p>
+    ${radon}`;
 }
 
 // Value recorded in the permit, with today's register value when it differs
@@ -552,6 +580,8 @@ function renderPlansAndEvents(p, center) {
 // Noise zones (Helsinki noise survey) and the nearest environmental permit facility, as published
 const NOISE_SOURCES = [['road', 'Road traffic'], ['rail', 'Railway'], ['tram', 'Tram']];
 
+const fmtStamp = (ms) => ms ? new Date(ms).toLocaleString('en-GB', { timeZone: 'Europe/Helsinki', dateStyle: 'medium', timeStyle: 'short' }) : '—';
+
 function renderEnvironment(p) {
   const band = (z) => z ? (z[1] == null ? `${z[0]}+ dB` : `${z[0]}–${z[1]} dB`) : 'Not in a mapped zone';
   const survey = DATA.noiseSurvey || {};
@@ -581,7 +611,97 @@ function renderEnvironment(p) {
     <h4 class="sub-title">Nearest environmental permit facility</h4>
     ${siteHtml}
     <p class="chart-footnote">Locations of activities in the City of Helsinki's environmental permit register (CC BY 4.0).
-    The register does not describe emissions or risk.</p>`;
+    The register does not describe emissions or risk.</p>
+    ${renderWater(p)}
+    ${renderFlood(p)}
+    ${renderRescue(p)}
+    <h4 class="sub-title">Indoor radon (postal code ${esc(p.postalCode || '—')})</h4>
+    ${radonHtml(p.postalCode)}`;
+}
+
+function renderWater(p) {
+  const list = (p.water || []).map(id => DATA.waterDisruptions?.[id]).filter(Boolean);
+  const rows = list.map(w => `
+    <div class="spec-card">
+      <span class="spec-label">${esc(w.area || 'Disruption')} • type ${esc(w.type ?? '—')}</span>
+      <span class="spec-value">${esc(fmtStamp(w.start))} – ${esc(fmtStamp(w.end))}</span>
+      <span class="muted">${w.residents != null ? `${fmtNum(w.residents)} residents affected` : ''}</span>
+    </div>`).join('');
+  return `
+    <h4 class="sub-title">Water supply disruptions (HSY)</h4>
+    ${list.length ? `<div class="specs-grid">${rows}</div>` : '<p class="muted">No disruption area touches this building.</p>'}
+    <p class="chart-footnote">Source: HSY – Helsinki Region Environmental Services, water supply disruption map
+    (Julkinen_Hairiokartta_katselu).</p>`;
+}
+
+// Syke flood hazard maps: the most frequent scenario whose flooded zone touches the building
+const FLOOD_LABELS = { sea: 'Sea flood', river: 'River and lake flood' };
+
+function renderFlood(p) {
+  const rows = Object.entries(FLOOD_LABELS).map(([kind, label]) => {
+    const f = p.flood?.[kind];
+    const value = !f ? 'Not covered by a flood hazard map'
+      : f.returnPeriod ? `In the 1/${f.returnPeriod} a zone • depth ${f.depth}`
+      : `Outside every mapped zone, up to 1/${Math.max(...DATA.floodReturnPeriods)} a`;
+    return `<div class="spec-card"><span class="spec-label">${esc(label)}</span><span class="spec-value">${esc(value)}</span></div>`;
+  }).join('');
+  const sea = p.seaLevelPoint && DATA.seaLevelPoints?.[p.seaLevelPoint.id];
+  const maps = Object.values(DATA.floodMaps || {}).flat();
+  return `
+    <h4 class="sub-title">Flood hazard (Syke)</h4>
+    <div class="specs-grid">${rows}</div>
+    <p class="chart-footnote">Flood hazard zones of the scenarios once in ${esc(DATA.floodReturnPeriods.join(', '))} years that touch the
+    building footprint${maps.length ? `; maps: ${esc(maps.join(', '))}` : ''}. Lähde: Syke ja Elinvoimakeskukset (CC BY 4.0).</p>
+    ${sea ? `
+    <h4 class="sub-title">Sea level at the nearest shoreline point (FMI)</h4>
+    ${detailGrid([
+      ['Distance', `${fmtNum(p.seaLevelPoint.m)} m from the building footprint`],
+      ['Estimate 2020', sea.y2020 != null && `${sea.y2020} m (N2000)`],
+      ['Estimate 2050', sea.y2050 != null && `${sea.y2050} m (N2000)`],
+      ['Estimate 2100', sea.y2100 != null && `${sea.y2100} m (N2000)`]
+    ])}
+    <p class="chart-footnote">Combined wave and water level estimates of the Finnish Meteorological Institute on the shoreline
+    (${sea.measured ? 'measured point' : 'value generalised along the shore'}); they describe the shore, not this building.
+    City of Helsinki WFS <em>FMI_Turvalliset_rakentamiskorkeudet_piste_2024</em> (CC BY 4.0).</p>` : ''}`;
+}
+
+function renderRescue(p) {
+  const st = p.rescueStation && DATA.rescueStations?.[p.rescueStation.id];
+  return `
+    <h4 class="sub-title">Nearest rescue station</h4>
+    ${st ? detailGrid([
+      ['Station', st.name],
+      ['Address', st.address],
+      ['Distance', `${fmtNum(p.rescueStation.m)} m in a straight line from the building footprint`]
+    ]) : '<p class="muted">No rescue station in the Service Map.</p>'}
+    <p class="chart-footnote">Rescue stations in the Helsinki Service Map (service 501, CC BY 4.0). Distance in a straight line,
+    not a driving route or response time.</p>`;
+}
+
+// STUK indoor radon by postal code; STUK leaves out areas with too few measurements
+const RADON_TABLES = [
+  ['workplaces', 'Workplaces', 'workplaces'],
+  ['houses', 'Detached houses', 'houses']
+];
+
+function radonHtml(postalCode) {
+  const tables = RADON_TABLES.map(([key, label, unit]) => {
+    const r = DATA.radon?.[key]?.byPostal?.[postalCode];
+    const over = Object.entries(r || {}).filter(([k, v]) => k.startsWith('over') && v != null)
+      .map(([k, v]) => `${fmtNum(v)}% over ${k.slice(4)} Bq/m³`).join(', ');
+    return `
+      <div class="spec-card">
+        <span class="spec-label">${esc(label)}</span>
+        <span class="spec-value">${r ? `median ${fmtNum(r.median)} • mean ${fmtNum(r.mean)} Bq/m³` : 'Not published for this postal code'}</span>
+        ${r ? `<span class="muted">${fmtNum(r.measured)} ${esc(unit)} measured${over ? ` • ${esc(over)}` : ''}</span>` : ''}
+      </div>`;
+  }).join('');
+  return `
+    <div class="specs-grid">${tables}</div>
+    <p class="chart-footnote">Source: STUK – Radiation and Nuclear Safety Authority, radon measurement results by postal code
+    (<a href="${esc(DATA.radon?.workplaces?.url)}" target="_blank" rel="noopener">workplaces</a>,
+    <a href="${esc(DATA.radon?.houses?.url)}" target="_blank" rel="noopener">detached houses</a>). Area figures, not a
+    measurement of this building.</p>`;
 }
 
 // Mark an environmental permit facility on the map (uses the plan overlay slot, so only one overlay shows)
@@ -785,6 +905,8 @@ function setupEventListeners() {
     if (e.data?.type === 'assistant:reply' && typeof e.data.text === 'string') focusMentions(e.data.text);
   });
   ['pcPrice', 'pcSize', 'pcRooms'].forEach(id => document.getElementById(id).addEventListener('input', updatePriceCheck));
+  document.querySelectorAll('.postal-select').forEach(sel =>
+    sel.addEventListener('change', () => selectPostal(sel.value || null)));
   document.getElementById('buildingSidebar').addEventListener('click', (e) => {
     const btn = e.target.closest('.item-toggle');
     if (btn) toggleItem(btn);
@@ -819,19 +941,25 @@ function setupEventListeners() {
     clearBtn.style.display = val ? 'block' : 'none';
     if (!val) { suggestions.style.display = 'none'; return; }
 
-    // A full address ("Fredikanterassi 3 B 14, 00520") resolves to its building; otherwise substring search
-    const exactId = /\d/.test(val) ? resolveAddress(val) : null;
+    // A full address ("Fredikanterassi 3 B 14, 00520") resolves to its buildings, nearest to the official
+    // address point first; otherwise substring search
+    const exactKey = /\d/.test(val) ? resolveAddress(val) : null;
+    const exactIds = exactKey ? ADDRESS_INDEX.get(exactKey) : [];
     const matches = [
-      ...(exactId ? [BUILDINGS.find(b => b.id === exactId)] : []),
-      ...BUILDINGS.filter(p => p.id !== exactId && p.address &&
+      ...exactIds.map(id => BUILDINGS.find(b => b.id === id)),
+      ...BUILDINGS.filter(p => !exactIds.includes(p.id) && p.address &&
         ([p.address, ...(p.otherAddresses || [])].some(a => a.toLowerCase().includes(val)) || (p.postalCode || '').includes(val)))
     ].slice(0, 12);
+    const pointNote = (m) => {
+      const d = exactIds.length > 1 && exactIds.includes(m.id) ? addressPointM(m, exactKey) : undefined;
+      return d !== undefined ? ` • ${fmtNum(d)} m from the address point` : '';
+    };
 
     suggestions.innerHTML = matches.length ? matches.map(m => `
       <div class="suggestion-item" data-id="${esc(m.id)}">
         <div>
           <strong>${esc(m.address)}</strong>
-          <span>${esc(m.postalCode || '')} • ${esc(m.class || '')}</span>
+          <span>${esc(m.postalCode || '')} • ${esc(m.class || '')}${esc(pointNote(m))}</span>
         </div>
         <span>${completedYear(m) || '?'}${m.apartments ? ` • ${m.apartments} apt.` : ''}</span>
       </div>`).join('')

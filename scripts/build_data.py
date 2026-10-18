@@ -15,12 +15,21 @@ Only official open data with a verified licence is used, every source is CC BY 4
   - Events                                    Linked Events API (api.hel.fi)                    (hri.fi: linked-events-tapahtumarajapinta)
   - Traffic noise zones (2022 survey, Lden)   kartta.hel.fi WFS  Meluselvitys_2022_Helsinki_*_Lden  (hri.fi: helsingin-kaupungin-meluselvitys-2017)
   - Environmental permit facilities           kartta.hel.fi WFS  Ymparistolupakohteet               (hri.fi: helsingin-ymparistolupakohteet)
+  - Official address points                   kartta.hel.fi WFS  Osoiteluettelo_piste_rekisteritiedot (hri.fi: helsingin-osoiteluettelo)
+  - Postal code areas touching the BBOX       Statistics Finland WFS geo.stat.fi  postialue:pno_<year>
+  - Flood hazard zones and mapped areas       Syke WFS  inspire_nz:NZ.Tulvavaaravyohykkeet_*, NZ.Tulvavaarakartoitetut_alueet_*
+  - Sea level estimates at the shoreline      kartta.hel.fi WFS  FMI_Turvalliset_rakentamiskorkeudet_piste_2024
+                                              (hri.fi: turvalliset-rakentamiskorkeudet-ja-suurin-arvioitu-merkitseva-aallonkorkeus-helsingissa)
+  - Rescue stations                           Service Map API api.hel.fi/servicemap  (hri.fi: paakaupunkiseudun-palvelukartan-rest-rajapinta)
   - Classification of Buildings 2018          Statistics Finland classifications API (data.stat.fi)
   - Helsinki register code explanations       scripts/helsinki_building_codes.json (from the helsingin-rakennukset dataset)
   - Permit type labels (codes 01-05)          scripts/ryhti_permit_codes.json (from Syke's CC BY repo sykefi/rakennuskohteet)
 
 Code-list labels from koodistot.suomi.fi are NOT used: the service publishes no licence for its content.
-HSY's water-supply disruption map (ArcGIS Julkinen_Hairiokartta_katselu) is NOT used for the same reason.
+HSY's water-supply disruption map (ArcGIS Julkinen_Hairiokartta_katselu) publishes no licence either; it is used on
+request, and only the fields below are requested (no contact fields).
+STUK's indoor radon tables by postal code (workplaces, detached houses) are read from the tables on its web pages;
+the pages state no licence. They are used on request and shown with STUK as the source.
 
 The app is English-only. Official English labels are used wherever the source publishes them;
 values without an official translation stay in Finnish and are listed at the end of the build
@@ -250,15 +259,125 @@ def building_class(code, fallback_fi):
 
 # ---------- Fetchers ----------
 
-def fetch_wfs(layer, bbox=BBOX):
+def fetch_wfs(layer, bbox=BBOX, base="https://kartta.hel.fi/ws/geoserver/avoindata/wfs", namespace="avoindata"):
     minx, miny, maxx, maxy = bbox
     params = {
         "service": "WFS", "version": "2.0.0", "request": "GetFeature",
-        "typeName": f"avoindata:{layer}", "outputFormat": "application/json", "srsName": "EPSG:4326",
+        "typeName": f"{namespace}:{layer}", "outputFormat": "application/json", "srsName": "EPSG:4326",
         # WFS 2.0 with EPSG:4326 uses lat,lon axis order
         "bbox": f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326",
     }
-    return get_json("https://kartta.hel.fi/ws/geoserver/avoindata/wfs?" + urllib.parse.urlencode(params))["features"]
+    return get_json(f"{base}?" + urllib.parse.urlencode(params))["features"]
+
+
+def widened(bbox, margin_m):
+    return [bbox[0] - margin_m / M_PER_DEG_LON, bbox[1] - margin_m / M_PER_DEG_LAT,
+            bbox[2] + margin_m / M_PER_DEG_LON, bbox[3] + margin_m / M_PER_DEG_LAT]
+
+
+def fetch_postal_areas():
+    """Postal code areas (Statistics Finland) that touch the BBOX, from the newest published year."""
+    for year in range(date.today().year, date.today().year - 3, -1):
+        try:
+            feats = fetch_wfs(f"pno_{year}", base="https://geo.stat.fi/geoserver/postialue/wfs", namespace="postialue")
+        except urllib.error.HTTPError:
+            continue
+        if feats:
+            return {"year": year, "names": {f["properties"]["posti_alue"]: f["properties"]["nimi"] for f in feats}}
+    raise RuntimeError("no postal code area layer found")
+
+
+# ---------- Flood hazard (Syke) ----------
+
+SYKE_WFS = "https://paikkatiedot.ymparisto.fi/geoserver/inspire_nz/wfs"
+FLOOD_KINDS = {"sea": "Meritulva", "river": "Vesistotulva"}
+FLOOD_RETURN_PERIODS = [2, 5, 10, 20, 50, 100, 250, 1000]  # published scenarios, once in N years
+
+
+def fetch_syke(layer, cql=None, page=500):
+    """All features of a Syke flood layer inside the BBOX (paged; an optional CQL condition is added)."""
+    minx, miny, maxx, maxy = BBOX
+    flt = f"BBOX(geom,{miny},{minx},{maxy},{maxx},'urn:ogc:def:crs:EPSG::4326')"
+    out, start = [], 0
+    while True:
+        params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature", "typeNames": f"inspire_nz:{layer}",
+                  "outputFormat": "application/json", "srsName": "EPSG:4326", "count": page, "startIndex": start,
+                  "sortBy": "objectid", "CQL_FILTER": f"{cql} AND {flt}" if cql else flt}
+        feats = get_json(f"{SYKE_WFS}?{urllib.parse.urlencode(params)}")["features"]
+        out += feats
+        if len(feats) < page:
+            return out
+        start += page
+
+
+def fetch_flood():
+    """Flood hazard zones with a water depth (depth classes 1-98; 0 is dry land, 99 a water body) per scenario,
+    and the areas Syke has mapped, for sea and river floods."""
+    zones = {(kind, rp): fetch_syke(f"NZ.Tulvavaaravyohykkeet_{layer}_1_{rp}a",
+                                    "syvsuojluokka_id >= 1 AND syvsuojluokka_id <= 98")
+             for kind, layer in FLOOD_KINDS.items() for rp in FLOOD_RETURN_PERIODS}
+    mapped = {kind: fetch_syke(f"NZ.Tulvavaarakartoitetut_alueet_{layer}") for kind, layer in FLOOD_KINDS.items()}
+    return {"zones": zones, "mapped": mapped}
+
+
+# ---------- Rescue stations (Service Map) ----------
+
+def fetch_rescue_stations():
+    """Units of the Service Map service 'rescue stations' (501) that are stations and have a location."""
+    url = ("https://api.hel.fi/servicemap/v2/unit/?service=501&page_size=100"
+           "&only=name,location,street_address,municipality")
+    out = []
+    while url:
+        page = get_json(url)
+        out += [u for u in page["results"] if u.get("location") and "asema" in (u.get("name") or {}).get("fi", "")]
+        url = page.get("next")
+    return out
+
+
+# ---------- Indoor radon (STUK) ----------
+
+STUK_RADON = {
+    "workplaces": "https://stuk.fi/hae-tyopaikkojen-radonmittaustuloksia-postinumeroalueittain",
+    "houses": "https://stuk.fi/pientalojen-radonpitoisuudet-postinumeroalueittain",
+}
+
+
+def html_table(page):
+    """First <table> of an HTML page -> list of {header: cell text}."""
+    import html as htmllib
+    table = re.search(r"<table.*?</table>", page, re.S).group()
+    rows = [[htmllib.unescape(re.sub(r"<[^>]+>", "", c)).strip()
+             for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", r, re.S)] for r in re.findall(r"<tr.*?</tr>", table, re.S)]
+    header = [h.split("  ")[0].strip() for h in rows[0]]  # drop the "Järjestä taulukko ..." sort hint
+    return [dict(zip(header, r)) for r in rows[1:] if r]
+
+
+def radon_key(header):
+    """STUK column header -> key ('Mediaani Bq/m3' -> 'median', '300 Bq/m3 ylitykset %' -> 'over300')."""
+    if header.startswith("Mitattuja"):
+        return "measured"
+    if header.startswith("Keskiarvo"):
+        return "mean"
+    if header.startswith("Mediaani"):
+        return "median"
+    m = re.match(r"(\d+) Bq/m3 ylitykset", header)
+    return f"over{m.group(1)}" if m else None
+
+
+def fetch_radon(postal_codes):
+    """STUK indoor radon tables by postal code; areas below STUK's publication threshold are absent."""
+    out = {}
+    for kind, url in STUK_RADON.items():
+        req = urllib.request.Request(url, headers={"User-Agent": "pasila-app/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            rows = html_table(r.read().decode("utf-8"))
+        by_postal = {}
+        for row in rows:
+            code = row.get("Postinumero")
+            if code in postal_codes:
+                by_postal[code] = {radon_key(k): (float(v) if v else None) for k, v in row.items() if radon_key(k)}
+        out[kind] = {"url": url, "byPostal": by_postal}
+    return out
 
 
 # Noise zones of the City of Helsinki noise survey 2022 (Lden, day-evening-night level)
@@ -273,6 +392,29 @@ NOISE_LAYERS = {
 PERMIT_SITE_RADIUS_M = 1000
 PERMIT_SITE_BBOX = [BBOX[0] - PERMIT_SITE_RADIUS_M / M_PER_DEG_LON, BBOX[1] - PERMIT_SITE_RADIUS_M / M_PER_DEG_LAT,
                     BBOX[2] + PERMIT_SITE_RADIUS_M / M_PER_DEG_LON, BBOX[3] + PERMIT_SITE_RADIUS_M / M_PER_DEG_LAT]
+
+
+# Address points are fetched this far beyond the BBOX, so a building near the edge still finds its address point
+ADDRESS_POINT_BBOX = widened(BBOX, 1000)
+# FMI's sea level estimates are points on the shoreline; this margin reaches the nearest shore from every building
+SEA_LEVEL_BBOX = widened(BBOX, 3000)
+
+
+HSY_DISRUPTIONS = ("https://services-eu1.arcgis.com/EKC1wtqlKQ2dy1HY/arcgis/rest/services/"
+                   "Julkinen_Hairiokartta_katselu/FeatureServer/0/query")
+
+
+def fetch_water_disruptions():
+    """HSY water-supply disruption areas intersecting the BBOX, as GeoJSON-like polygons (WGS84)."""
+    minx, miny, maxx, maxy = BBOX
+    params = {
+        "geometry": json.dumps({"xmin": minx, "ymin": miny, "xmax": maxx, "ymax": maxy, "spatialReference": {"wkid": 4326}}),
+        "geometryType": "esriGeometryEnvelope", "spatialRel": "esriSpatialRelIntersects",
+        "inSR": "4326", "outSR": "4326", "outFields": "OBJECTID,tyyppi,alkuaika,loppuaika,nimi,asukkaat", "f": "json",
+    }
+    data = get_json(f"{HSY_DISRUPTIONS}?{urllib.parse.urlencode(params)}")
+    return [{"geometry": {"type": "Polygon", "coordinates": f["geometry"]["rings"]}, "properties": f["attributes"]}
+            for f in data.get("features", []) if f.get("geometry", {}).get("rings")]
 
 
 def fetch_ogc(path):
@@ -304,8 +446,11 @@ def pxweb(path, query, lang="en"):
 
 
 def fetch_prices(postal_codes):
+    meta = get_json(f"{PXWEB}/en/StatFin/ashi/13mu.px")
+    published = next(v["values"] for v in meta["variables"] if v["code"] == "postinumeroalue_4_20220101")
     labels, rows, cats = pxweb("StatFin/ashi/13mu.px", [
-        {"code": "postinumeroalue_4_20220101", "selection": {"filter": "item", "values": postal_codes}},
+        {"code": "postinumeroalue_4_20220101",
+         "selection": {"filter": "item", "values": [pc for pc in postal_codes if pc in published]}},
         {"code": "talotyyppi_6_20131021", "selection": {"filter": "item", "values": ["1", "2", "3"]}},
     ])
     result = {}
@@ -318,7 +463,8 @@ def fetch_prices(postal_codes):
             "byPostal": result}
 
 
-PAAVO_FIELDS = ["he_vakiy", "he_kika", "hr_mtu", "te_taly", "te_takk", "te_as_valj", "te_yks",
+PAAVO_FIELDS = ["he_vakiy", "he_kika", "hr_mtu", "tr_kuty", "tr_ktu", "tr_mtu", "tr_pi_tul", "tr_ke_tul", "tr_hy_tul",
+                "te_taly", "te_takk", "te_as_valj", "te_yks",
                 "te_laps", "te_omis_as", "te_vuok_as", "ra_asunn", "ra_as_kpa", "ra_kt_as", "ra_raky"]
 
 
@@ -401,6 +547,16 @@ def plot_key(property_id):
     return "".join(ch for ch in (property_id or "") if ch.isdigit()) or None
 
 
+def property_label(property_id):
+    """'09101700260001' or '091-017-0026-0001' -> '091-017-0026-0001'."""
+    k = plot_key(property_id)
+    return f"{k[:3]}-{k[3:6]}-{k[6:10]}-{k[10:]}" if k and len(k) == 14 else property_id
+
+
+def norm_address(a):
+    return " ".join((a or "").split()).lower()
+
+
 def plot_info(p):
     use = p.get("kayttotarkoitusluokka") or ""
     code = p.get("kayttotarkoitusluokka_koodi")
@@ -414,7 +570,8 @@ def plot_info(p):
     })
 
 
-def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise, permit_sites):
+def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise, permit_sites, water, address_points,
+          hazards):
     ryhti_by_vtj = {f["properties"]["permanent_building_identifier"]: f for f in ryhti}
     ryhti_points = [(k, *f["geometry"]["coordinates"]) for k, f in ryhti_by_vtj.items()]
     addr_by_key = {}
@@ -458,6 +615,26 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
     plans_used = {}  # plan id -> details + boundary (stored once, buildings reference the id)
 
     stats = {"register": 0, "spatial": 0, "verified": 0, "mismatch": 0, "context": 0}
+
+    def ryhti_or(ryhti_value, helsinki_value):
+        """Ryhti wins; Ryhti publishes 0 for unknown storeys/areas/volume, so 0 falls back to the Helsinki register."""
+        return ryhti_value if ryhti_value not in (None, 0, "") else helsinki_value
+
+    # Official address points (several points can carry the same address, e.g. a square)
+    points_by_address = {}
+    for a in address_points:
+        if (a.get("geometry") or {}).get("type") == "Point":
+            points_by_address.setdefault(norm_address(a["properties"].get("katuosoite")), []) \
+                .append(a["geometry"]["coordinates"][:2])
+
+    def address_point_m(addresses, parts):
+        """Registered address -> metres from the building's footprints to its official address point."""
+        out = {}
+        for a in addresses:
+            pts = points_by_address.get(norm_address(a))
+            if a and pts:
+                out[a] = round(min(distance_m(x, y, part["geometry"]) for x, y in pts for part in parts))
+        return out
 
     # 1) Decide which building (VTJ-PRT) each footprint belongs to
     groups, context, verified = {}, [], set()
@@ -523,6 +700,83 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             })
         return {"id": sid, "m": round(best[0])}
 
+    # HSY water-supply disruption areas that any footprint of the building touches
+    water_zones = [(EdgeIndex(w["geometry"]), w["properties"]) for w in water]
+    water_used = {}
+
+    def water_of(parts):
+        ids = []
+        for zone, wp in water_zones:
+            if any(intersects_indexed(p["geometry"], zone) for p in parts):
+                wid = str(wp["OBJECTID"])
+                water_used.setdefault(wid, {"area": wp.get("nimi"), "start": wp.get("alkuaika"),
+                                            "end": wp.get("loppuaika"), "residents": wp.get("asukkaat"),
+                                            "type": wp.get("tyyppi")})
+                ids.append(wid)
+        return sorted(ids, key=lambda i: water_used[i]["start"] or 0, reverse=True)
+
+    # Syke flood hazard: per kind, whether the building lies in a mapped area and the most frequent scenario
+    # whose flooded zone touches a footprint, with the deepest depth class touched
+    flood_zones = {key: [(EdgeIndex(z["geometry"]), z["properties"]) for z in zs if polygons_of(z["geometry"])]
+                   for key, zs in hazards["flood"]["zones"].items()}
+    flood_mapped = {kind: [(EdgeIndex(a["geometry"]), a["properties"].get("nimi")) for a in areas
+                           if polygons_of(a["geometry"])] for kind, areas in hazards["flood"]["mapped"].items()}
+    flood_maps_used = {}
+
+    def flood_of(parts):
+        touches = lambda zone: any(intersects_indexed(p["geometry"], zone) for p in parts)
+        out = {}
+        for kind in FLOOD_KINDS:
+            maps = [name for zone, name in flood_mapped[kind] if touches(zone)]
+            if not maps:
+                continue  # no flood hazard map covers the building
+            flood_maps_used.setdefault(kind, set()).update(maps)
+            out[kind] = {"returnPeriod": None}
+            for rp in FLOOD_RETURN_PERIODS:
+                hit = [zp for zone, zp in flood_zones[(kind, rp)] if touches(zone)]
+                if hit:
+                    deepest = max(hit, key=lambda zp: zp["syvsuojluokka_id"])
+                    out[kind] = {"returnPeriod": rp, "depth": deepest["syvsuojluokka"]}
+                    break
+        return out
+
+    # Nearest point of a point layer, measured from the footprint edge
+    def nearest(points, parts):
+        best = min(((min(distance_m(*pt["geometry"]["coordinates"][:2], part["geometry"]) for part in parts), pt)
+                    for pt in points), key=lambda b: b[0], default=None)
+        return best
+
+    sea_points = [pt for pt in hazards["seaLevel"] if (pt.get("geometry") or {}).get("type") == "Point"]
+    sea_used = {}
+
+    def sea_level_of(parts):
+        best = nearest(sea_points, parts)
+        if not best:
+            return None
+        sp = best[1]["properties"]
+        sid = str(sp["id"])
+        sea_used.setdefault(sid, prune({
+            "y2020": sp.get("arvio_vuodelle_2020"), "y2050": sp.get("arvio_vuodelle_2050"),
+            "y2100": sp.get("arvio_vuodelle_2100"), "measured": sp.get("mittauspiste"),
+            "updated": d10(sp.get("paivitetty_tietopalveluun")),
+            "lonlat": [round(c, 6) for c in best[1]["geometry"]["coordinates"][:2]]}))
+        return {"id": sid, "m": round(best[0])}
+
+    stations = [{"geometry": u["location"], "unit": u} for u in hazards["rescue"]]
+    stations_used = {}
+
+    def rescue_of(parts):
+        best = nearest(stations, parts)
+        if not best:
+            return None
+        u = best[1]["unit"]
+        uid = str(u["id"])
+        stations_used.setdefault(uid, prune({
+            "name": u["name"].get("en") or u["name"].get("fi"),
+            "address": (u.get("street_address") or {}).get("fi"),
+            "lonlat": [round(c, 6) for c in u["location"]["coordinates"][:2]]}))
+        return {"id": uid, "m": round(best[0])}
+
     # 2) Building attributes per VTJ-PRT. Footprint geometries are passed through exactly as
     #    published by the City of Helsinki: one feature per footprint, never merged or rounded.
     features = []
@@ -536,14 +790,13 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             continue
         # The register part that carries the attributes (largest floor area wins)
         h = max((p["properties"] for p in parts), key=lambda p: p.get("i_kerrosala") or 0)
+        # Addresses: Ryhti first (its first address is the main one), the Helsinki register address is kept too
         ryhti_addr = sorted(addr_by_key.get(rp.get("building_key"), []), key=lambda a: a.get("address_number") or 99)
-        if h.get("katunimi_suomi"):
-            address = f"{h['katunimi_suomi']} {h.get('osoitenumero') or ''}".strip()
-            postal = h.get("postinumero")
-        elif ryhti_addr:
-            address, postal = ryhti_addr[0]["address_fin"], ryhti_addr[0]["postal_code"]
-        else:
-            address, postal = None, None
+        helsinki_address = f"{h['katunimi_suomi']} {h.get('osoitenumero') or ''}".strip() \
+            if h.get("katunimi_suomi") else None
+        addresses = list(dict.fromkeys(a for a in [*(a["address_fin"].strip() for a in ryhti_addr), helsinki_address] if a))
+        address = addresses[0] if addresses else None
+        postal = ryhti_addr[0]["postal_code"] if ryhti_addr else h.get("postinumero")
         ratu = str(h.get("ratu") or "")
 
         plans_here = []
@@ -566,26 +819,35 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
                 plans_here.append(pid)
 
         # Plot zoning: the plan unit whose id equals the building's property id
-        property_id = h.get("c_kiinteistotunnus") or rp.get("property_identifier")
+        property_id = property_label(ryhti_or(rp.get("property_identifier"), h.get("c_kiinteistotunnus")))
         plot = plot_by_id.get(plot_key(property_id))
 
+        # Register values: Ryhti first, the Helsinki register fills what Ryhti lacks. Class, elevator, energy,
+        # heating, material, facade and connections come from Helsinki: Ryhti gives those only as koodistot.suomi.fi
+        # codes, whose labels are not licensed.
         props = {
             "id": vtj,
             "vtj": vtj,
             "footprintId": None,  # set per part below
             "address": address,
-            "otherAddresses": [a["address_fin"] for a in ryhti_addr if a["address_fin"] != address][:4],
-            "postalCode": postal or (ryhti_addr[0]["postal_code"] if ryhti_addr else None),
+            "otherAddresses": addresses[1:5],
+            "addressPointM": address_point_m(addresses[:5], parts),
+            "postalCode": postal,
             "class": building_class(h.get("c_rakennusluokka"), h.get("tyyppi")),
-            "completed": d10(h.get("c_valmpvm")) or d10(rp.get("completion_date")),
-            "storeys": h.get("i_kerrlkm") or rp.get("number_of_storeys"),
-            "apartments": h.get("i_asuinhuoneistojen_lkm") or rp.get("apartment_count") or 0,
-            "floorArea": h.get("i_kerrosala") or rp.get("gross_floor_area"),
-            "totalArea": h.get("i_kokala") or rp.get("total_area"),
-            "volume": h.get("i_raktilav") or rp.get("volume"),
+            "completed": d10(rp.get("completion_date")) or d10(h.get("c_valmpvm")),
+            "storeys": ryhti_or(rp.get("number_of_storeys"), h.get("i_kerrlkm")),
+            "apartments": rp["apartment_count"] if rp.get("apartment_count") is not None
+                          else h.get("i_asuinhuoneistojen_lkm") or 0,
+            "floorArea": ryhti_or(rp.get("gross_floor_area"), h.get("i_kerrosala")),
+            "totalArea": ryhti_or(rp.get("total_area"), h.get("i_kokala")),
+            "volume": ryhti_or(rp.get("volume"), h.get("i_raktilav")),
             "elevator": h.get("c_hissi") == "x" if h.get("c_hissi") is not None else None,
-            "propertyId": h.get("c_kiinteistotunnus") or rp.get("property_identifier"),
+            "propertyId": property_id,
             "energy": helsinki_code("RA_LAMMONLAHDE", h.get("c_poltaine")),
+            "heating": helsinki_code("RA_LAMMITYSTAPA", h.get("c_lammtapa")),
+            # Register flags are "x" when a connection is recorded; an empty flag means "not recorded", not "none"
+            "connections": [name for name, key in (("Water", "c_vesilii"), ("Sewer", "c_viemlii"),
+                                                   ("Electricity", "c_sahkolii")) if h.get(key) == "x"],
             "structure": helsinki_code("RA_KANTRAKAINE", h.get("c_rakeaine")),
             "facade": helsinki_code("RA_JULKISIVUMAT", h.get("c_julkisivu")),
             "protection": protected_by_ratu.get(ratu),
@@ -594,6 +856,10 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             "history": sorted(permits_by_vtj.get(vtj, []), key=lambda x: x["decision"] or x["start"] or "", reverse=True),
             "noise": noise_of(parts),
             "permitSite": permit_site_of(parts),
+            "water": water_of(parts),
+            "flood": flood_of(parts),
+            "seaLevelPoint": sea_level_of(parts),
+            "rescueStation": rescue_of(parts),
         }
         for part in parts:
             features.append({"type": "Feature", "geometry": part["geometry"],
@@ -605,7 +871,9 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
         if in_bbox(*centroid(f["geometry"])):
             stats["context"] += 1
             context_feats.append({"type": "Feature", "geometry": f["geometry"], "properties": {}})
-    return features, context_feats, plans_used, sites_used, stats
+    hazard_refs = {"floodMaps": {k: sorted(v) for k, v in flood_maps_used.items()},
+                   "seaLevelPoints": sea_used, "rescueStations": stations_used}
+    return features, context_feats, plans_used, sites_used, water_used, hazard_refs, stats
 
 
 def main():
@@ -621,6 +889,12 @@ def main():
         "plan units": lambda: fetch_wfs("Kaavayksikot"),
         **{f"noise {k}": (lambda layer=layer: fetch_wfs(layer)) for k, layer in NOISE_LAYERS.items()},
         "permit sites": lambda: fetch_wfs("Ymparistolupakohteet", PERMIT_SITE_BBOX),
+        "water disruptions": fetch_water_disruptions,
+        "address points": lambda: fetch_wfs("Osoiteluettelo_piste_rekisteritiedot", ADDRESS_POINT_BBOX),
+        "postal areas": fetch_postal_areas,
+        "flood": fetch_flood,
+        "sea level points": lambda: fetch_wfs("FMI_Turvalliset_rakentamiskorkeudet_piste_2024", SEA_LEVEL_BBOX),
+        "rescue stations": fetch_rescue_stations,
         "ryhti buildings": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_building"),
         "ryhti addresses": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_address"),
         "ryhti permits": lambda: fetch_ogc("ryhti_permit/ogc/features/v1/collections/open_permit_building"),
@@ -644,16 +918,21 @@ def main():
             job.result()
 
     noise = {k: got[f"noise {k}"] for k in NOISE_LAYERS}
-    features, context, plans, permit_sites, stats = build(
+    features, context, plans, permit_sites, water, hazard_refs, stats = build(
         got["footprints"], got["ryhti buildings"], got["ryhti addresses"], got["ryhti permits"], got["protected"],
-        got["plans in force"] + got["plans pending"], got["plan units"], noise, got["permit sites"])
+        got["plans in force"] + got["plans pending"], got["plan units"], noise, got["permit sites"],
+        got["water disruptions"], got["address points"],
+        {"flood": got["flood"], "seaLevel": got["sea level points"], "rescue": got["rescue stations"]})
     print("  join:", stats, "-> footprints", len(features))
 
-    postal = sorted({f["properties"]["postalCode"] for f in features if f["properties"].get("postalCode")})
+    # Every postal code area touching the BBOX, plus any postal code registered for a building in it
+    postal_areas = got["postal areas"]
+    postal = sorted(set(postal_areas["names"]) |
+                    {f["properties"]["postalCode"] for f in features if f["properties"].get("postalCode")})
     print("  postal codes", postal)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        prices_job, paavo_job = pool.submit(fetch_prices, postal), pool.submit(fetch_paavo, postal)
-        prices, paavo = prices_job.result(), paavo_job.result()
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        jobs = [pool.submit(fetch_prices, postal), pool.submit(fetch_paavo, postal), pool.submit(fetch_radon, postal)]
+        prices, paavo, radon = (j.result() for j in jobs)
 
     data = {
         "generated": date.today().isoformat(),
@@ -669,6 +948,12 @@ def main():
                                         for zs in noise.values() for z in zs), default=None) or None},
         "permitSites": permit_sites,
         "permitSiteRadius": PERMIT_SITE_RADIUS_M,
+        "waterDisruptions": water,
+        "postalAreas": {"year": postal_areas["year"], "codes": postal,
+                        "inBbox": sorted(postal_areas["names"])},
+        "radon": radon,
+        "floodReturnPeriods": FLOOD_RETURN_PERIODS,
+        **hazard_refs,
         "joinStats": stats,
     }
     OUT.parent.mkdir(exist_ok=True)

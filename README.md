@@ -1,6 +1,6 @@
 # Pasila Intelligence
 
-An interactive map of the Pasila district in Helsinki. Click a building to see its details, building-permit history, area price trends, postal-area statistics, detailed plans, nearby events, traffic noise and the nearest environmental permit facility. The app uses only official open data (CC BY 4.0).
+An interactive map of the Pasila district in Helsinki. Click a building to see its details (including heating and recorded network connections), building-permit history, area price trends, postal-area statistics (including household income), detailed plans, nearby events, traffic noise, the nearest environmental permit facility, HSY water-supply disruptions, flood hazard zones (Syke), sea level estimates at the nearest shoreline point (FMI), the nearest rescue station and indoor radon by postal code (STUK). Postal-area statistics, prices and radon cover every postal code area that touches the map area. Each value is fetched from its publisher when the data is built (see REPORT.md); HSY and STUK publish no licence and are used on request, everything else is CC BY 4.0.
 
 ## Project structure
 

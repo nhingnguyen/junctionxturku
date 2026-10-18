@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=7.4">
+  <link rel="stylesheet" href="style.css?v=7.7">
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -133,6 +133,7 @@
         <!-- TAB 2: Postal code area statistics (Paavo) -->
         <section id="tabArea" class="tab-body">
           <h3 class="section-title"><i class="fa-solid fa-people-roof"></i> Postal code area statistics</h3>
+          <label class="postal-pick">Postal code area <select class="postal-select" aria-label="Postal code area"></select></label>
           <div id="areaContainer"></div>
         </section>
 
@@ -144,6 +145,7 @@
 
         <!-- TAB 4: Price history (Statistics Finland) -->
         <section id="tabPrice" class="tab-body">
+          <label class="postal-pick">Postal code area <select class="postal-select" aria-label="Postal code area"></select></label>
           <div class="price-header">
             <div>
               <span class="price-sub" id="priceSub">—</span>
@@ -207,11 +209,12 @@
           <div class="license-badge cc">CC BY 4.0</div>
           <div class="license-info">
             <h4>Buildings, protection, detailed plans, base maps – City of Helsinki</h4>
-            <p>WFS/WMS kartta.hel.fi: <em>Rakennukset_alue_rekisteritiedot</em>, <em>Asemakaavoissa_suojellut_rakennukset</em>, <em>Kaavahakemisto</em>, <em>Kaavayksikot</em>, <em>Ortoilmakuva 2025</em>, <em>Kantakartta</em>. © Helsingin kaupunki, CC BY 4.0 (HRI:
+            <p>WFS/WMS kartta.hel.fi: <em>Rakennukset_alue_rekisteritiedot</em>, <em>Asemakaavoissa_suojellut_rakennukset</em>, <em>Kaavahakemisto</em>, <em>Kaavayksikot</em>, <em>Osoiteluettelo_piste_rekisteritiedot</em>, <em>Ortoilmakuva 2025</em>, <em>Kantakartta</em>. © Helsingin kaupunki, CC BY 4.0 (HRI:
             <a href="https://hri.fi/data/fi/dataset/helsingin-rakennukset" target="_blank">buildings</a>,
             <a href="https://hri.fi/data/fi/dataset/asemakaavoilla-suojellut-rakennukset-ja-alueet-helsingissa" target="_blank">protected buildings</a>,
             <a href="https://hri.fi/data/fi/dataset/helsingin-asemakaavahakemistokartta-asemakaavahakemisto" target="_blank">plan index</a>,
             <a href="https://hri.fi/data/fi/dataset/helsingin-kaavayksikot" target="_blank">plan units</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-osoiteluettelo" target="_blank">addresses</a>,
             <a href="https://hri.fi/data/fi/dataset/helsingin-ortoilmakuvat" target="_blank">aerial photos</a>,
             <a href="https://hri.fi/data/fi/dataset/helsingin-kantakartta" target="_blank">base map</a>). Footprint geometries are displayed exactly as published. Heating energy source, load-bearing material and facade labels come from the dataset's <a href="https://kartta.hel.fi/avoindata/dokumentit/2017-01-10_Rakennusaineisto_avoindata_koodistot.pdf" target="_blank">code explanations</a>.</p>
           </div>
@@ -247,6 +250,23 @@
           </div>
         </div>
         <div class="license-item">
+          <div class="license-badge cc">CC BY 4.0</div>
+          <div class="license-info">
+            <h4>Flood hazard, sea level, rescue stations, postal code areas</h4>
+            <p>Syke WFS <em>inspire_nz</em> flood hazard zones – Lähde: Syke ja Elinvoimakeskukset (<a href="https://ckan.ymparisto.fi/dataset/tulvavaaravyohykkeet-perusskenaariot-flood-hazard-zones-basic-scenarios" target="_blank">metadata</a>).
+            FMI sea level estimates on the shoreline, WFS kartta.hel.fi <em>FMI_Turvalliset_rakentamiskorkeudet_piste_2024</em> (<a href="https://hri.fi/data/fi/dataset/turvalliset-rakentamiskorkeudet-ja-suurin-arvioitu-merkitseva-aallonkorkeus-helsingissa" target="_blank">HRI</a>).
+            Rescue stations from the Service Map API (<a href="https://hri.fi/data/fi/dataset/paakaupunkiseudun-palvelukartan-rest-rajapinta" target="_blank">HRI</a>).
+            Postal code areas © Tilastokeskus (geo.stat.fi).</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge stat">STUK</div>
+          <div class="license-info">
+            <h4>Indoor radon by postal code – STUK</h4>
+            <p>Radon measurement results by postal code for <a href="https://stuk.fi/hae-tyopaikkojen-radonmittaustuloksia-postinumeroalueittain" target="_blank">workplaces</a> and <a href="https://stuk.fi/pientalojen-radonpitoisuudet-postinumeroalueittain" target="_blank">detached houses</a>. The pages state no licence; shown with STUK as the source.</p>
+          </div>
+        </div>
+        <div class="license-item">
           <div class="license-badge nls">ODbL</div>
           <div class="license-info">
             <h4>OpenStreetMap base map</h4>
@@ -269,7 +289,7 @@
 
   <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="data/pasila-data.js?v=1792279854"></script>
-  <script src="app.js?v=7.6"></script>
+  <script src="data/pasila-data.js?v=1792292705"></script>
+  <script src="app.js?v=8.0"></script>
 </body>
 </html>
