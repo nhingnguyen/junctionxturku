@@ -1,0 +1,24 @@
+{
+  "name": "mcp-helsinki-decisions",
+  "version": "1.0.0",
+  "description": "MCP tools for Helsinki municipal decisions enriched with a local parcel index",
+  "license": "ISC",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx --test src/*.test.ts",
+    "test:live": "tsx src/live-smoke-test.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

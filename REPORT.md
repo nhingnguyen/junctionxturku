@@ -1,6 +1,6 @@
 # Pasila Intelligence – Technical & Data Report
 
-A web map of the Pasila district (Helsinki). Click a building to see its details, building-permit history, area price development, postal-area statistics, detailed plans and nearby events. Only official open data with a verified licence is used (§6). The app is English-only: it uses the official English labels published by the sources; values without an official translation are shown in Finnish (see §5.1).
+A web map of the Pasila district (Helsinki). Click a building to see its details, building-permit history, area price development, postal-area statistics, detailed plans, nearby events, traffic noise and the nearest environmental permit facility. An optional AI assistant panel can focus the map on the places it names (§9). Only official open data with a verified licence is used (§6). The app is English-only: it uses the official English labels published by the sources; values without an official translation are shown in Finnish (see §5.1).
 
 ---
 
@@ -8,8 +8,8 @@ A web map of the Pasila district (Helsinki). Click a building to see its details
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Data pipeline | Python 3 (standard library only: `urllib`, `json`, `concurrent.futures`) – [scripts/build_data.py](scripts/build_data.py) | Fetches all APIs in parallel (with retries) for a fixed BBOX, joins them, writes one static data file (~5–10 s) |
-| Data file | [data/pasila-data.js](data/pasila-data.js) (`window.PASILA_DATA = {...}`, ~920 KB, ~170 KB gzipped) | GeoJSON + statistics consumed by the frontend; no backend needed |
+| Data pipeline | Python 3 (standard library only: `urllib`, `json`, `concurrent.futures`) – [scripts/build_data.py](scripts/build_data.py) | Fetches all APIs in parallel (with retries) for a fixed BBOX, joins them, writes one static data file (~30 s) |
+| Data file | [data/pasila-data.js](data/pasila-data.js) (`window.PASILA_DATA = {...}`, ~1.1 MB, ~220 KB gzipped) | GeoJSON + statistics consumed by the frontend; no backend needed |
 | Frontend | HTML + vanilla JavaScript – [index.html](index.html), [app.js](app.js), [style.css](style.css) | UI, sidebar tabs, search |
 | Map | Leaflet 1.9.4 | Base maps, footprint polygons (`L.geoJSON`), WMS layers |
 | Chart | Chart.js 4.4.1 | Price history chart |
@@ -20,12 +20,13 @@ A web map of the Pasila district (Helsinki). Click a building to see its details
                 build time (python scripts/build_data.py)                       run time (browser)
  ┌───────────────────────────────┐
  │ Helsinki WFS (footprints,      │──┐
- │ protection, detailed plans)    │  │
+ │ protection, detailed plans,    │  │
+ │ noise zones, env. permits)     │  │
  │ Ryhti OGC API (buildings,      │  │   join by VTJ-PRT,      ┌──────────────────────┐     ┌──────────────────────────┐
  │ addresses, permits)            │──┼─► point-in-polygon, ──► │ data/pasila-data.js  │ ──► │ index.html + app.js       │
  │ Stat. Finland classifications  │  │   postal code           └──────────────────────┘     │ Leaflet: base map (as-is) │
  │ StatFin PxWeb (prices, Paavo)  │──┤                                                      │ + footprint overlay       │
- │ Linked Events (events)         │──┘                                                      │ click → sidebar (5 tabs)  │
+ │ Linked Events (events)         │──┘                                                      │ click → sidebar (6 tabs)  │
  └───────────────────────────────┘                                                         └────────────┬─────────────┘
                                                                                                         │ tiles at run time
                                                               OSM tiles / Helsinki WMS (ortho, Kantakartta) ◄┘
@@ -55,6 +56,8 @@ A web map of the Pasila district (Helsinki). Click a building to see its details
 | **Plot zoning** (permitted use, building rights, plot area) | City of Helsinki | WFS `avoindata:Kaavayksikot` | `kaavayksikkotunnus` (= property ID), `kayttotarkoitusluokka`, `rakennusoikeus`, `rekisteriala`, `kaavatunnus`; joined only on the building's property ID, no location-based guessing (543/616 buildings) |
 | **Detailed plans (asemakaava) covering the building** – click a plan for details and its boundary on the map | City of Helsinki | WFS `Kaavahakemisto_alue_kaava_voimassa`, `…_vireilla` | `kaavatunnus`, `luokka`, `hyvaksymispvm`, `vahvistamispvm`, `lainvoimaisuuspvm`, `voimaantulopvm`, `pintaala`, `muokkauspvm`, `geometry` |
 | **Events nearby** | City of Helsinki | Linked Events API | `name.en` (fallback `fi`), `start_time`, `location.name.en`, `location.position` |
+| **Traffic noise** (Environment tab) – road, railway, tram | City of Helsinki noise survey 2022 | WFS `Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden`, `…_rautatiet_Lden`, `…_raitiotie_Lden` | `db_lo`, `db_hi`, `geometry`; the highest Lden zone that touches any of the building's footprints, shown as published (e.g. *60–65 dB*, *75+ dB*) |
+| **Nearest environmental permit facility** (Environment tab) | City of Helsinki | WFS `Ymparistolupakohteet` | `nimi`, `katuosoite`, `postitoimipaikka`, `toiminnan_luokittelun_tarkenne`, point geometry; distance in metres from the footprint edge |
 | Base maps | OpenStreetMap; City of Helsinki | OSM tiles; WMS `Ortoilmakuva_2025_5cm`, `Kantakartta` | raster tiles, loaded at run time |
 
 > Ryhti `open_building` only has a **point** per building. All **polygons** come from the City of Helsinki.
@@ -305,6 +308,31 @@ Labels come from the English table metadata (`GET` on the same URL), e.g. `he_va
 ```
 The app stores `name.en` (falling back to `fi`), `location.name.en`, start/end, and shows events within 800 m of the selected building, linking to `https://tapahtumat.hel.fi/en/events/{id}`.
 
+### 3.10b Traffic noise zones – City of Helsinki WFS (noise survey 2022)
+
+**Request:** same WFS as 3.1 with `typeName=avoindata:Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden` (road traffic, 447 zones in the BBOX), `…_rautatiet_Lden` (railway, 179) and `…_raitiotie_Lden` (tram, 191). One request returns every zone (`numberMatched` = `numberReturned`), so nothing is cut off by paging.
+**Response:** Polygons, one per 5 dB band. Bands start at 45 dB; `db_hi` is `null` for the top band (75+ dB). Some zones have up to ~42 000 vertices.
+```json
+"properties": {
+  "id": 17156, "db_lo": 70, "db_hi": 75, "colour": "#FF0000",
+  "datanomistaja": "Helsinki/Ympa", "paivitetty_tietopalveluun": "2025-06-16"
+}
+```
+Lden is the modelled day-evening-night outdoor level; the zones are not indoor levels. The published colours are not used.
+
+### 3.10c Environmental permit facilities – City of Helsinki WFS `Ymparistolupakohteet`
+
+**Request:** same WFS with `typeName=avoindata:Ymparistolupakohteet`, but with the BBOX widened by 1 km on every side (31 facilities). The widening makes the nearest facility correct for every building whenever it lies within 1 km; buildings with none within 1 km would show "no facility" (none in the current build, the furthest is 714 m).
+```json
+"properties": {
+  "id": "4966208", "nimi": "Pohjolan Liikenne Oy / Veturitien varikko ja jakelupiste",
+  "katuosoite": "Veturitie 25", "postitoimipaikka": "00240 HELSINKI",
+  "toiminnan_luokittelun_tarkenne": "YSL 527/2014 liite 4.6 ajoneuvovarikko",
+  "datanomistaja": "Helsingin kaupunki, ympäristöpalvelut", "paivitetty_tietopalveluun": "2026-10-16"
+}
+```
+The register lists where permitted activities are; it does not describe emissions or risk, and the app does not add any.
+
 ### 3.11 Base maps (loaded by the browser, not stored)
 
 | Layer | URL | Notes |
@@ -324,6 +352,8 @@ The app stores `name.en` (falling back to `fi`), `location.name.en`, start/end, 
 5. **Detailed plans:** point-in-polygon of the building point in plan areas. Each plan used is stored once in `plans` (details + boundary as published); buildings reference plan numbers.
 6. **Prices & Paavo:** by `postinumero`.
 7. **Clipping:** only buildings whose point lies inside the BBOX are kept. Result: **616 clickable buildings + 217 context footprints**.
+8. **Traffic noise:** for each noise layer, the zones are tested from the loudest band down; the first zone whose polygon overlaps any of the building's footprints (shared area or boundary, holes respected) gives the band. The large zone polygons are indexed by latitude rows so each footprint only checks nearby edges. 520 of 616 buildings touch at least one zone. Cross-checked against shapely for all buildings: 0 differences.
+9. **Nearest environmental permit facility:** shortest distance in metres from each facility point to the building's footprints (0 if inside), planar metres at 60.2° N (<1 % error inside the BBOX). Facilities used are stored once in `permitSites`; buildings reference the id. Cross-checked against shapely: same facility for all 616 buildings, distances within 1 m.
 
 ## 5. Output format – `data/pasila-data.js`
 
@@ -331,7 +361,7 @@ The app stores `name.en` (falling back to `fi`), `location.name.en`, start/end, 
 
 ```js
 window.PASILA_DATA = {
-  generated: "2026-10-17",
+  generated: "2026-10-18",
   bbox: [24.915, 60.191, 24.95, 60.209],
   buildings: { type: "FeatureCollection", features: [ /* one feature per Helsinki footprint */ ] },
   context:   { type: "FeatureCollection", features: [ /* unlinked minor structures, geometry only */ ] },
@@ -339,6 +369,9 @@ window.PASILA_DATA = {
   prices:    { years: [...], types: { "1": "Blocks of flats, one-room flat", … }, byPostal: { "00520": { "2": { price: {...}, count: {...} } } } },
   paavo:     { year: "2024", labels: {...}, byPostal: { "00520": { name, values } } },
   events:    [ { name, start, end, place, lon, lat, url } ],
+  noiseSurvey: { year: 2022, metric: "Lden", updated: "2025-06-16" },
+  permitSites: { "5350916": { name, address, postOffice, activity, updated, lonlat }, … },
+  permitSiteRadius: 1000,
   joinStats: { register: 642, spatial: 0, verified: 626, mismatch: 6, context: 217 }
 };
 ```
@@ -356,6 +389,8 @@ One building feature (geometry unchanged from 3.1):
     "propertyId": "091-017-0105-0006",
     "energy": "Kauko- tai aluelämpö", "structure": "Betoni tai kevytbetoni", "facade": "Tiili",
     "plans": ["12360"],
+    "noise": { "road": [60, 65], "rail": [50, 55], "tram": [55, 60] },
+    "permitSite": { "id": "5350916", "m": 130 },
     "history": [ { "decision": "2020-04-23", "start": "2021-08-18", "completed": "2022-11-29",
                    "permitId": "3002201897", "dvvId": "09100020-02460012004",
                    "storeys": 8, "apartments": 51, "grossFloorArea": 4783, "floorArea": 2795, "totalArea": 5396, "volume": 18310 } ]
@@ -365,7 +400,7 @@ One building feature (geometry unchanged from 3.1):
 
 ### 5.1 Values without an official English label
 
-The build prints every Finnish value it could not resolve to an official English label (70 values, ~1 730 characters in the current build). They are shown in Finnish for now and are the input for a planned machine-translation step:
+The build prints every Finnish value it could not resolve to an official English label (81 values, ~2 140 characters in the current build). They are shown in Finnish for now and are the input for a planned machine-translation step:
 
 | Kind | Examples | Why |
 |---|---|---|
@@ -374,6 +409,7 @@ The build prints every Finnish value it could not resolve to an official English
 | Plan status, approving body | Voimassa, Vireillä, kylk | Helsinki WFS publishes Finnish only |
 | Building class fallback | Muuntamo, Toimistorakennus, … | footprints without a `c_rakennusluokka` code |
 | Event names | Satutunti, Perheaamu, … | event has no `name.en` in Linked Events |
+| Environmental permit activity | YSL 527/2014 liite 2.3 jakeluasema, … | Helsinki WFS publishes Finnish only |
 
 ---
 
@@ -391,10 +427,14 @@ The build prints every Finnish value it could not resolve to an official English
 | Statistics Finland classifications API `rakennus_1_20180712` | Building class (fi + en) | CC BY 4.0 | [Open data and interfaces](https://stat.fi/en/services/statistical-data-services/open-data-and-interfaces) (lists the classifications API under the open-data licence) | © Tilastokeskus |
 | Helsinki building register code explanations (PDF) | Energy source, material, facade labels | CC BY 4.0 | Linked from [HRI: helsingin-rakennukset](https://hri.fi/data/fi/dataset/helsingin-rakennukset) | © Helsingin kaupunki |
 | Syke GitHub `sykefi/rakennuskohteet` | Permit type labels (codes 01–05) | CC BY 4.0 | [LICENSE](https://github.com/sykefi/rakennuskohteet/blob/HEAD/LICENSE) in the repository | Syke |
+| Helsinki WFS `Meluselvitys_2022_Helsinki_*_Lden` | Traffic noise zones | CC BY 4.0 | [HRI: helsingin-kaupungin-meluselvitys-2017](https://hri.fi/data/fi/dataset/helsingin-kaupungin-meluselvitys-2017) (the city's noise survey dataset; the 2022 layers are served from the same WFS) | © Helsingin kaupunki |
+| Helsinki WFS `Ymparistolupakohteet` | Environmental permit facilities | CC BY 4.0 | [HRI: helsingin-ymparistolupakohteet](https://hri.fi/data/fi/dataset/helsingin-ymparistolupakohteet) | © Helsingin kaupunki |
 | Linked Events | Events | CC BY 4.0 | [HRI: linked-events-tapahtumarajapinta](https://hri.fi/data/fi/dataset/linked-events-tapahtumarajapinta) | City of Helsinki |
 | OpenStreetMap tiles | Default base map | ODbL + Tile Usage Policy | [OSM copyright](https://www.openstreetmap.org/copyright), [Tile policy](https://operations.osmfoundation.org/policies/tiles/) | © OpenStreetMap contributors |
 
-**Rules:** a source is used only if its licence is stated by the publisher, and the app shows published values without drawing its own conclusions (no inferred statuses, no verification verdicts, no good/bad colouring; plots are linked only by ID). **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit status labels, construction method or Ryhti's purpose label (permit types come from Syke's CC BY data model instead).
+**Rules:** a source is used only if its licence is stated by the publisher, and the app shows published values without drawing its own conclusions (no inferred statuses, no verification verdicts, no good/bad colouring; plots are linked only by ID). **Not used:** koodistot.suomi.fi code-list labels (no licence published for the content; only the software is EUPL-1.2). As a result the app does not show Ryhti's permit status labels, construction method or Ryhti's purpose label (permit types come from Syke's CC BY data model instead). Also not used: HSY's water-supply disruption map (ArcGIS `Julkinen_Hairiokartta_katselu`), which publishes no licence and whose records contain HSY staff e-mail addresses.
+
+**Evaluated and rejected (no published per-building data):** flood depth, radon, fire class, rescue response times, power-grid status and arson risk. Values for these were proposed as fixed constants or inferred from building materials; they are not shown. Flood could be added from SYKE's official flood hazard maps if they are actually queried.
 
 Attribution is shown in the map corner and in the *Sources & Licences* dialog.
 
@@ -430,6 +470,24 @@ The footprint data is exact. Visible offsets come from display, not from the dat
 ## 8. Run / update
 
 ```powershell
-python scripts/build_data.py      # refresh data/pasila-data.js (~5–10 s)
+python scripts/build_data.py      # refresh data/pasila-data.js (~30 s)
 python -m http.server 8000        # open http://localhost:8000
 ```
+
+## 9. AI assistant panel (optional)
+
+The *Assistant* button opens a side panel with an iframe (`#assistantFrame`, loaded lazily from `data-src="http://localhost:3000"`) that shows the agent's own Next.js chat UI. The agent (frontend, Express backend on port 4000, Ollama LLM, MCP servers for Ryhti, MML and Helsinki decisions) is in the [agent/](agent/) folder, taken from the branch `feature/helsinki-decisions`. Its keys go in `agent/.env` (git-ignored). See the README for setup.
+
+**Map focus.** The agent UI posts each reply to the parent page:
+```ts
+window.parent?.postMessage({ type: "assistant:reply", text: data.reply }, "http://localhost:8000");
+```
+This is the only change made in the agent's code (marked `ADDED FOR PASILA INTELLIGENCE (map focus)` in `frontend/src/app/page.tsx`). Pasila accepts the message only when it comes from the iframe's window and origin, then matches the text against the official data only:
+
+1. VTJ-PRT and property ID (kiinteistötunnus);
+2. street addresses (all buildings at an address, narrowed when a VTJ-PRT is also named);
+3. if no building matched: a street name, then a postal code area.
+
+One building opens its panel (on narrow screens it is highlighted instead, so the assistant stays visible); several are highlighted in purple and fitted into view, with a bar naming what was matched. Sending a reply costs no LLM tokens: it is a browser message between two local pages.
+
+**Tested end to end (2026-10-18)** with the live backend: "Which buildings are on Pasilankatu?" → 13 addresses listed → 13 buildings highlighted. Known limitation: matching is purely textual, so a reply that says an address was *not* found still highlights that address.

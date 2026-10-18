@@ -1,0 +1,25 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      LLM_PROVIDER: ollama
+      OLLAMA_URL: https://ollama.com
+      OLLAMA_MODEL: gemma4:31b-cloud
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY}
+      TIMEZONE: Europe/Helsinki
+      SYKE_USER_ID: ${SYKE_USER_ID:-ryhti}
+      MML_API_KEY: ${MML_API_KEY:-}
+      MML_BASE_URL: ${MML_BASE_URL:-https://avoin-paikkatieto.maanmittauslaitos.fi/kiinteisto-avoin/simple-features/v3}
+      MML_GEOCODING_BASE_URL: ${MML_GEOCODING_BASE_URL:-https://avoin-paikkatieto.maanmittauslaitos.fi/geocoding/v2}
+      HELSINKI_DECISIONS_API_URL: ${HELSINKI_DECISIONS_API_URL:-https://paatokset-elastic-proxy.api.hel.ninja/paatokset_decisions/_search}
+      PARCEL_DATA_PATH: /app/data/bbox_parcels.json
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./mcp-ryhti/src:/app/mcp-ryhti/src
+      - ./mcp-mml/src:/app/mcp-mml/src
+      - ./mcp-helsinki-decisions/src:/app/mcp-helsinki-decisions/src
+      - ./bbox_parcels.json:/app/data/bbox_parcels.json:ro

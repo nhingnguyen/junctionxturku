@@ -16,6 +16,8 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
 ├── data/
 │   └── pasila-data.js      # Generated dataset loaded by the page
 ├── README.md
+├── REPORT.md               # Technical & data report
+└── agent/                  # AI assistant (optional, runs separately; see below)
 ```
 
 ## Run locally
@@ -47,37 +49,40 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
 
 ## AI assistant (optional)
 
-The **Assistant** button in the header opens a panel that shows the agent's own chat UI. The agent (Next.js frontend, backend, LLM and Ryhti MCP server) lives on the `dev/Docker` branch and runs separately.
+The **Assistant** button in the header opens a panel that shows the agent's own chat UI. The agent (Next.js frontend, Express backend, Ollama LLM and MCP servers for Ryhti, MML and Helsinki decisions) is in the [agent/](agent/) folder (taken from the `feature/helsinki-decisions` branch) and runs separately.
 
-1. Check out `dev/Docker` (for example into `dev-docker/`, which is git-ignored):
+1. Create `agent/.env` from `agent/.env.example` (`.env` is git-ignored) and fill in the keys:
+
+   | Variable | Needed for |
+   |---|---|
+   | `OLLAMA_API_KEY` | The LLM (required) |
+   | `MML_API_KEY` | MML parcel and geocoding tools (optional; those tools fail without it) |
+   | `SYKE_USER_ID`, `MML_BASE_URL`, `MML_GEOCODING_BASE_URL`, `HELSINKI_DECISIONS_API_URL` | Defaults from `.env.example` work |
+
+2. Start the backend (API on `http://localhost:4000`):
 
    ```bash
-   git fetch origin
-   git worktree add --detach dev-docker origin/dev/Docker
+   cd agent
+   docker compose up --build -d
    ```
 
-2. Start the backend (API on `http://localhost:4000`) with an Ollama API key:
-
-   ```bash
-   cd dev-docker
-   OLLAMA_API_KEY=<your key> docker compose up --build
-   ```
+   `http://localhost:4000/health` should return `{"status":"ok","provider":"ollama"}` and `/tools` lists 13 tools.
 
 3. Start the agent's frontend (on `http://localhost:3000`):
 
    ```bash
-   cd dev-docker/frontend
+   cd agent/frontend
    npm install
    npm run dev
    ```
 
-4. Open the app and click **Assistant**.
+4. Open the app at `http://localhost:8000` and click **Assistant**.
 
 If the frontend runs at another address, change `data-src` on `#assistantFrame` in `index.html`.
 
 ### Map focus on the assistant's replies
 
-When the agent's UI posts a reply to this page, the map focuses on the places it names. The agent's UI has to send each reply with:
+When the agent's UI posts a reply to this page, the map focuses on the places it names. This is the one line added to the agent's code, in [agent/frontend/src/app/page.tsx](agent/frontend/src/app/page.tsx) (in `send()`, after the reply is added to the chat, marked `ADDED FOR PASILA INTELLIGENCE (map focus)`):
 
 ```ts
 window.parent?.postMessage({ type: "assistant:reply", text: data.reply }, "http://localhost:8000");
@@ -93,7 +98,9 @@ Only messages from the assistant iframe's origin are accepted. The reply is matc
 
 One building opens its panel (on narrow screens it is highlighted instead, so the assistant stays open); several are highlighted in purple with a bar naming what was matched.
 
-## Updating the data## Updating the data
+Matching is purely textual: a reply that says an address was *not* found still highlights it.
+
+## Updating the data
 
 The dataset is a snapshot. Re-run `python scripts/build_data.py` whenever you want fresh data. The snapshot date is shown in the app header.
 
@@ -111,6 +118,8 @@ Then rebuild. Building footprints come from the City of Helsinki, so the area mu
 | Problem | Fix |
 |---|---|
 | Blank base map | Open the app via `http://localhost:8000`, not by double-clicking `index.html` |
+| Assistant panel shows a Next.js error mentioning `fonts.gstatic.com` | A Google Font download timed out on first start and Next.js cached the failure; stop `npm run dev` (and any leftover `node` process on port 3000) and start it again |
+| `Another next dev server is already running` | An old dev server still holds port 3000; stop it (`taskkill /PID <pid> /F` on Windows, the PID is in the message) |
 | `Port 8000 is already in use` | Use another port, e.g. `python -m http.server 8080` |
 | `python` not found (Windows) | Install Python from python.org and tick *Add to PATH*, or use `py scripts/build_data.py` |
 | Build script fails with a timeout or HTTP error | One of the open data services is temporarily unavailable; wait and run it again |

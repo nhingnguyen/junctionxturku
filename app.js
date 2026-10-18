@@ -769,7 +769,7 @@ function closeSidebar() {
 function setupEventListeners() {
   document.getElementById('closeSidebarBtn').addEventListener('click', closeSidebar);
 
-  // AI assistant: the agent's own frontend (dev/Docker branch)
+  // AI assistant: the agent's own frontend (agent/frontend)
   document.getElementById('assistantBtn').addEventListener('click', () =>
     setAssistantOpen(!document.getElementById('assistantPanel').classList.contains('open')));
   document.getElementById('closeAssistantBtn').addEventListener('click', () => setAssistantOpen(false));
