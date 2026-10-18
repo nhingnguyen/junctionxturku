@@ -52,6 +52,11 @@ BBOX = [24.915, 60.191, 24.950, 60.209]
 ROOT = Path(__file__).resolve().parent.parent
 HELSINKI_CODES = json.loads((Path(__file__).resolve().parent / "helsinki_building_codes.json").read_text(encoding="utf-8"))
 PERMIT_CODES = json.loads((Path(__file__).resolve().parent / "ryhti_permit_codes.json").read_text(encoding="utf-8"))
+
+# Assumption (shown as such in the app): whether the registered heating energy source (RA_LAMMONLAHDE) burns fuel
+# inside the building, i.e. brings an open flame or fuel store on site. 10 "Muu" (other) cannot be classified.
+FUEL_BURNED_ON_SITE = {"1": False, "2": True, "3": True, "4": False, "5": True,
+                       "6": True, "7": True, "8": True, "9": False}
 OUT = ROOT / "data" / "pasila-data.js"
 INDEX = ROOT / "index.html"
 
@@ -90,6 +95,8 @@ def polygons_of(geom):
         return [geom["coordinates"]]
     if geom["type"] == "MultiPolygon":
         return geom["coordinates"]
+    if geom["type"] == "GeometryCollection":
+        return [poly for g in geom["geometries"] for poly in polygons_of(g)]
     return []  # lines/points carry no area
 
 
@@ -332,6 +339,89 @@ def fetch_rescue_stations():
         out += [u for u in page["results"] if u.get("location") and "asema" in (u.get("name") or {}).get("fi", "")]
         url = page.get("next")
     return out
+
+
+# ---------- Electricity distribution (Energiavirasto) ----------
+
+VTP_WFS = "https://verkkotietopiste.fi/geoserver/vtp/wfs"
+ENERGIAVIRASTO_PUBLICATIONS = "https://energiavirasto.fi/verkkotoiminnan-julkaisut"
+
+
+def fetch_text(url):
+    url = urllib.parse.quote(url, safe=":/?=&%+()~#")  # published links can contain letters such as 'ä'
+    req = urllib.request.Request(url, headers={"User-Agent": "pasila-app/1.0"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return r.read()
+
+
+def xlsx_rows(data, sheet=1):
+    """Rows of one sheet of an .xlsx file as {column letter: value} (stdlib only)."""
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    z = zipfile.ZipFile(io.BytesIO(data))
+    shared = [] if "xl/sharedStrings.xml" not in z.namelist() else \
+        ["".join(t.text or "" for t in si.iter(ns + "t")) for si in ET.fromstring(z.read("xl/sharedStrings.xml"))]
+    rows = []
+    for r in ET.fromstring(z.read(f"xl/worksheets/sheet{sheet}.xml")).iter(ns + "row"):
+        row = {}
+        for c in r.findall(ns + "c"):
+            v = c.find(ns + "v")
+            if v is not None:
+                row[re.match(r"[A-Z]+", c.get("r")).group()] = shared[int(v.text)] if c.get("t") == "s" else v.text
+        rows.append(row)
+    return rows
+
+
+# Columns of Energiavirasto's distribution network indicators, found by their published numbering/heading
+GRID_INDICATORS = {
+    "mvOutageUnplannedH": r"^\(3\.7\)",   # medium voltage: energy-weighted interruption time from unexpected faults, h/a
+    "mvOutagePlannedH": r"^\(3\.9\)",     # medium voltage: same for planned interruptions, h/a
+    "lvOutageUnplannedH": r"^\(3\.14\)",  # low voltage (0.4 kV): unexpected faults, h/a
+    "lvOutagePlannedH": r"^\(3\.16\)",    # low voltage: planned, h/a
+    "cableLvPct": r"^a\) 0,4 kV:n verkon maakaapelointiaste",
+    "cableMvPct": r"^b\) 1-70 kV:n verkon maakaapelointiaste",
+    "cableHvPct": r"^c\) 110 kV:n verkon maakaapelointiaste",
+}
+
+
+def fetch_grid_indicators(operators):
+    """Newest 'technical indicators' workbook of Energiavirasto: the distribution network figures per operator."""
+    page = fetch_text(ENERGIAVIRASTO_PUBLICATIONS).decode("utf-8")
+    links = re.findall(r'href="([^"]*tekniset[^"]*tunnusluvut[^"]*\.xlsx[^"]*)"', page, re.I)
+    links = [l for l in links if "maakaasu_" not in l.lower() and "kaasuverkon" not in l.lower()]
+    # the year in the file name (".../Sähköverkkotoiminnan tekniset tunnusluvut 2024.xlsx/<id>?t=...")
+    file_year = lambda l: max(map(int, re.findall(r"\b(20\d\d)\b", re.search(r"[^/]*\.xlsx", urllib.parse.unquote(l)).group()
+                                                  .replace("_", " "))), default=0)
+    url = urllib.parse.urljoin(ENERGIAVIRASTO_PUBLICATIONS, max(links, key=file_year))
+    rows = xlsx_rows(fetch_text(url), sheet=1)
+    header = rows[0]
+    year = int(float(rows[1].get("B") or file_year(url)))  # the second row holds the reporting year
+    cols = {key: next((c for c, h in header.items() if re.match(pat, h.strip())), None)
+            for key, pat in GRID_INDICATORS.items()}
+    out = {}
+    for row in rows[2:]:
+        name = (row.get("A") or "").strip()
+        if name in operators:
+            out[name] = {key: float(row[c]) for key, c in cols.items() if c and row.get(c) not in (None, "")}
+    return {"year": year, "url": url, "byOperator": out}
+
+
+def fetch_power():
+    """Distribution system operator areas and supply security requirement areas (Verkkotietopiste, Energiavirasto),
+    plus the operators' network indicators."""
+    areas = fetch_wfs("action_area_WFS", base=VTP_WFS, namespace="vtp")
+    reliability = fetch_wfs("electric_reliabilities_WFS", base=VTP_WFS, namespace="vtp")
+    # Each operator publishes its requirement areas as series; keep its newest series per hour limit
+    newest = {}
+    for f in reliability:
+        p = f["properties"]
+        key = (p["organization_name"], p["laatualue_tuntimaara"])
+        if key not in newest or (p.get("created_at") or "") > (newest[key]["properties"].get("created_at") or ""):
+            newest[key] = f
+    operators = {f["properties"]["organization_name"] for f in areas}
+    return {"areas": areas, "reliability": list(newest.values()), "indicators": fetch_grid_indicators(operators)}
 
 
 # ---------- Indoor radon (STUK) ----------
@@ -777,6 +867,23 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             "lonlat": [round(c, 6) for c in u["location"]["coordinates"][:2]]}))
         return {"id": uid, "m": round(best[0])}
 
+    # Electricity: the distribution system operator whose service area holds the building, and the supply
+    # security requirement area (maximum outage from storms or snow, Electricity Market Act 588/2013, section 51)
+    power = hazards["power"]
+    dso_areas = [(EdgeIndex(a["geometry"]), a["properties"]["organization_name"]) for a in power["areas"]
+                 if polygons_of(a["geometry"])]
+    requirement_areas = [(EdgeIndex(a["geometry"]), a["properties"]) for a in power["reliability"]
+                         if polygons_of(a["geometry"])]
+    operators_used = set()
+
+    def power_of(parts):
+        touches = lambda zone: any(intersects_indexed(p["geometry"], zone) for p in parts)
+        operators = sorted({name for zone, name in dso_areas if touches(zone)})
+        operators_used.update(operators)
+        limits = sorted({rp["laatualue_tuntimaara"] for zone, rp in requirement_areas
+                         if rp["organization_name"] in operators and touches(zone)})
+        return {"operators": operators, "maxOutageH": limits}
+
     # 2) Building attributes per VTJ-PRT. Footprint geometries are passed through exactly as
     #    published by the City of Helsinki: one feature per footprint, never merged or rounded.
     features = []
@@ -844,6 +951,7 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             "elevator": h.get("c_hissi") == "x" if h.get("c_hissi") is not None else None,
             "propertyId": property_id,
             "energy": helsinki_code("RA_LAMMONLAHDE", h.get("c_poltaine")),
+            "fuelOnSite": FUEL_BURNED_ON_SITE.get(str(h.get("c_poltaine"))),
             "heating": helsinki_code("RA_LAMMITYSTAPA", h.get("c_lammtapa")),
             # Register flags are "x" when a connection is recorded; an empty flag means "not recorded", not "none"
             "connections": [name for name, key in (("Water", "c_vesilii"), ("Sewer", "c_viemlii"),
@@ -860,6 +968,7 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             "flood": flood_of(parts),
             "seaLevelPoint": sea_level_of(parts),
             "rescueStation": rescue_of(parts),
+            "power": power_of(parts),
         }
         for part in parts:
             features.append({"type": "Feature", "geometry": part["geometry"],
@@ -872,7 +981,10 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise,
             stats["context"] += 1
             context_feats.append({"type": "Feature", "geometry": f["geometry"], "properties": {}})
     hazard_refs = {"floodMaps": {k: sorted(v) for k, v in flood_maps_used.items()},
-                   "seaLevelPoints": sea_used, "rescueStations": stations_used}
+                   "seaLevelPoints": sea_used, "rescueStations": stations_used,
+                   "gridOperators": {"year": power["indicators"]["year"], "url": power["indicators"]["url"],
+                                     "byOperator": {n: power["indicators"]["byOperator"].get(n, {})
+                                                    for n in sorted(operators_used)}}}
     return features, context_feats, plans_used, sites_used, water_used, hazard_refs, stats
 
 
@@ -895,6 +1007,7 @@ def main():
         "flood": fetch_flood,
         "sea level points": lambda: fetch_wfs("FMI_Turvalliset_rakentamiskorkeudet_piste_2024", SEA_LEVEL_BBOX),
         "rescue stations": fetch_rescue_stations,
+        "power": fetch_power,
         "ryhti buildings": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_building"),
         "ryhti addresses": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_address"),
         "ryhti permits": lambda: fetch_ogc("ryhti_permit/ogc/features/v1/collections/open_permit_building"),
@@ -922,7 +1035,8 @@ def main():
         got["footprints"], got["ryhti buildings"], got["ryhti addresses"], got["ryhti permits"], got["protected"],
         got["plans in force"] + got["plans pending"], got["plan units"], noise, got["permit sites"],
         got["water disruptions"], got["address points"],
-        {"flood": got["flood"], "seaLevel": got["sea level points"], "rescue": got["rescue stations"]})
+        {"flood": got["flood"], "seaLevel": got["sea level points"], "rescue": got["rescue stations"],
+         "power": got["power"]})
     print("  join:", stats, "-> footprints", len(features))
 
     # Every postal code area touching the BBOX, plus any postal code registered for a building in it

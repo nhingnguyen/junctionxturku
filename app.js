@@ -611,7 +611,8 @@ function renderEnvironment(p) {
     <p class="chart-footnote">Location only, no emission data. City of Helsinki (CC BY 4.0).</p>
     ${renderWater(p)}
     ${renderFlood(p)}
-    ${renderRescue(p)}
+    ${renderFireRescue(p)}
+    ${renderPower(p)}
     <h4 class="sub-title">Indoor radon (postal code ${esc(p.postalCode || '—')})</h4>
     ${radonHtml(p.postalCode)}`;
 }
@@ -660,16 +661,49 @@ function renderFlood(p) {
     <p class="chart-footnote">Water and wave height on the shore, not at this building. FMI via City of Helsinki (CC BY 4.0).</p>` : ''}`;
 }
 
-function renderRescue(p) {
+// Fire and rescue: the register's fire-relevant facts as recorded, and the nearest rescue station
+function renderFireRescue(p) {
   const st = p.rescueStation && DATA.rescueStations?.[p.rescueStation.id];
   return `
-    <h4 class="sub-title">Nearest rescue station</h4>
-    ${st ? detailGrid([
-      ['Station', st.name],
-      ['Address', st.address],
-      ['Distance', `${fmtNum(p.rescueStation.m)} m in a straight line from the building's nearest wall`]
-    ]) : '<p class="muted">No rescue station in the Service Map.</p>'}
-    <p class="chart-footnote">Not a driving time. Helsinki Service Map (CC BY 4.0).</p>`;
+    <h4 class="sub-title">Fire and rescue</h4>
+    ${detailGrid([
+      ['Load-bearing material', p.structure],
+      ['Facade material', p.facade],
+      ['Storeys', p.storeys],
+      ['Heating energy source', p.energy],
+      ['Ignition hazard from heating*', p.fuelOnSite == null ? (p.energy ? 'Cannot be classified' : null)
+        : p.fuelOnSite ? 'Higher: fuel is burned in the building' : 'Low: no fuel burned in the building'],
+      ['Water connection (register)', p.connections?.includes('Water') ? 'Recorded' : 'Not recorded'],
+      ['Nearest rescue station', st && `${st.name}, ${st.address || ''}`],
+      ['Distance to the station', st && `${fmtNum(p.rescueStation.m)} m in a straight line`]
+    ])}
+    <p class="chart-footnote">Register values, not a fire class. Stations: Helsinki Service Map (CC BY 4.0).</p>
+    <p class="chart-footnote">* Our assumption, not an official rating: oil, gas, coal, wood and peat are burned on site;
+    district heat, electricity and ground heat are not. Fireplaces, saunas and wiring are not considered.</p>`;
+}
+
+// Electricity: distribution operator and supply security area (Energiavirasto), operator's network figures
+const minutes = (h) => h == null ? null : `${fmtNum(Math.round(h * 60 * 10) / 10)} min`;
+
+function renderPower(p) {
+  const ops = p.power?.operators || [];
+  const grid = DATA.gridOperators || {};
+  const op = ops.length === 1 ? grid.byOperator?.[ops[0]] || {} : {};
+  return `
+    <h4 class="sub-title">Electricity supply</h4>
+    ${detailGrid([
+      ['Distribution operator', ops.join(', ') || '—'],
+      ['Max. outage from storm or snow', p.power?.maxOutageH?.length ? `${p.power.maxOutageH.join(' / ')} h (legal requirement)` : null],
+      [`Outage time per customer ${grid.year || ''}, 1–70 kV network`, op.mvOutageUnplannedH != null
+        ? `${minutes(op.mvOutageUnplannedH)} unplanned, ${minutes(op.mvOutagePlannedH)} planned` : null],
+      [`Outage time per customer ${grid.year || ''}, 0.4 kV network`, op.lvOutageUnplannedH != null
+        ? `${minutes(op.lvOutageUnplannedH)} unplanned, ${minutes(op.lvOutagePlannedH)} planned` : null],
+      ['Underground cables', op.cableLvPct != null
+        ? `${fmtNum(Math.round(op.cableLvPct * 10) / 10)}% (0.4 kV), ${fmtNum(Math.round(op.cableMvPct * 10) / 10)}% (1–70 kV)` : null]
+    ])}
+    <p class="chart-footnote">Operator-wide figures, not this building. Energiavirasto:
+    <a href="https://energiavirasto.fi/verkonhaltijat-kartalla" target="_blank" rel="noopener">operator areas</a> (CC BY 4.0),
+    <a href="${esc(grid.url)}" target="_blank" rel="noopener">technical indicators</a>.</p>`;
 }
 
 // STUK indoor radon by postal code; STUK leaves out areas with too few measurements
