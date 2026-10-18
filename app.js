@@ -591,7 +591,7 @@ function renderEnvironment(p) {
       ['Name', site.name],
       ['Address', [site.address, site.postOffice].filter(Boolean).join(', ')],
       ['Activity (as registered)', site.activity],
-      ['Distance', `${fmtNum(p.permitSite.m)} m from the building footprint`]
+      ['Distance', `${fmtNum(p.permitSite.m)} m in a straight line from the building's nearest wall`]
     ])}
     <button class="btn btn-outline env-site-btn" onclick="showPermitSite('${esc(p.permitSite.id)}')"><i class="fa-solid fa-location-crosshairs"></i> Show on map</button>`
     : `<p class="muted">No facility within ${fmtNum(DATA.permitSiteRadius || 0)} m.</p>`;
@@ -605,7 +605,7 @@ function renderEnvironment(p) {
           <span class="spec-value">${esc(band(p.noise?.[k]))}</span>
         </div>`).join('')}
     </div>
-    <p class="chart-footnote">The highest noise zone that touches the building footprint. Zones are modelled outdoor
+    <p class="chart-footnote">The highest noise zone that touches the building outline on the map. Zones are modelled outdoor
     day-evening-night levels and start at 45 dB; they are not indoor levels. Source: City of Helsinki noise survey ${esc(survey.year || '')}
     (CC BY 4.0)${survey.updated ? `, updated ${fmtDate(survey.updated)}` : ''}.</p>
     <h4 class="sub-title">Nearest environmental permit facility</h4>
@@ -640,9 +640,12 @@ const FLOOD_LABELS = { sea: 'Sea flood', river: 'River and lake flood' };
 function renderFlood(p) {
   const rows = Object.entries(FLOOD_LABELS).map(([kind, label]) => {
     const f = p.flood?.[kind];
-    const value = !f ? 'Not covered by a flood hazard map'
-      : f.returnPeriod ? `In the 1/${f.returnPeriod} a zone • depth ${f.depth}`
-      : `Outside every mapped zone, up to 1/${Math.max(...DATA.floodReturnPeriods)} a`;
+    // Syke scenarios are named by return period: "1/100 a" is a flood expected once in 100 years on average
+    const rarest = Math.max(...DATA.floodReturnPeriods);
+    const chance = (years) => `${+(100 / years).toPrecision(2)}% chance per year`;
+    const value = !f ? 'No flood hazard map covers this building'
+      : f.returnPeriod ? `Flooded by a flood expected once in ${fmtNum(f.returnPeriod)} years (${chance(f.returnPeriod)}); water depth ${f.depth}`
+      : `Not flooded, even by the rarest mapped flood (expected once in ${fmtNum(rarest)} years, ${chance(rarest)})`;
     return `<div class="spec-card"><span class="spec-label">${esc(label)}</span><span class="spec-value">${esc(value)}</span></div>`;
   }).join('');
   const sea = p.seaLevelPoint && DATA.seaLevelPoints?.[p.seaLevelPoint.id];
@@ -650,12 +653,13 @@ function renderFlood(p) {
   return `
     <h4 class="sub-title">Flood hazard (Syke)</h4>
     <div class="specs-grid">${rows}</div>
-    <p class="chart-footnote">Flood hazard zones of the scenarios once in ${esc(DATA.floodReturnPeriods.join(', '))} years that touch the
-    building footprint${maps.length ? `; maps: ${esc(maps.join(', '))}` : ''}. Lähde: Syke ja Elinvoimakeskukset (CC BY 4.0).</p>
+    <p class="chart-footnote">Syke maps the area flooded by floods of different rarity: floods expected on average once in
+    ${esc(DATA.floodReturnPeriods.join(', '))} years. The building counts as flooded if any part of its outline on the map lies in
+    such an area${maps.length ? `. Maps covering it: ${esc(maps.join(', '))}` : ''}. Lähde: Syke ja Elinvoimakeskukset (CC BY 4.0).</p>
     ${sea ? `
     <h4 class="sub-title">Sea level at the nearest shoreline point (FMI)</h4>
     ${detailGrid([
-      ['Distance', `${fmtNum(p.seaLevelPoint.m)} m from the building footprint`],
+      ['Distance', `${fmtNum(p.seaLevelPoint.m)} m in a straight line from the building's nearest wall`],
       ['Estimate 2020', sea.y2020 != null && `${sea.y2020} m (N2000)`],
       ['Estimate 2050', sea.y2050 != null && `${sea.y2050} m (N2000)`],
       ['Estimate 2100', sea.y2100 != null && `${sea.y2100} m (N2000)`]
@@ -672,7 +676,7 @@ function renderRescue(p) {
     ${st ? detailGrid([
       ['Station', st.name],
       ['Address', st.address],
-      ['Distance', `${fmtNum(p.rescueStation.m)} m in a straight line from the building footprint`]
+      ['Distance', `${fmtNum(p.rescueStation.m)} m in a straight line from the building's nearest wall`]
     ]) : '<p class="muted">No rescue station in the Service Map.</p>'}
     <p class="chart-footnote">Rescue stations in the Helsinki Service Map (service 501, CC BY 4.0). Distance in a straight line,
     not a driving route or response time.</p>`;
