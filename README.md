@@ -8,6 +8,7 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
 .
 ├── index.html              # Page layout
 ├── app.js                  # Map, sidebar, search
+├── config.js               # Addresses of the optional AI assistant
 ├── style.css               # Styles
 ├── scripts/
 │   ├── build_data.py                # Fetches open data and builds data/pasila-data.js
@@ -78,7 +79,7 @@ The **Assistant** button in the header opens a panel that shows the agent's own 
 
 4. Open the app at `http://localhost:8000` and click **Assistant**.
 
-If the frontend runs at another address, change `data-src` on `#assistantFrame` in `index.html`.
+If the backend or the frontend runs at another address, change `agentApi` or `agentUi` in `config.js`. The file is sent to the browser, so it holds addresses only, never keys.
 
 ### Map focus on the assistant's replies
 

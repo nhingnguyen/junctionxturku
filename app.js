@@ -303,7 +303,7 @@ function renderSpecs(p) {
 
 }
 
-// Postal code areas touching the data area (Statistics Finland), selectable in the Area and Prices tabs.
+// Postal code areas touching the data area (Statistics Finland), selectable in the Area tab (statistics and prices).
 // Opening a building selects its registered postal code.
 function selectPostal(code) {
   selectedPostal = code;
@@ -440,9 +440,9 @@ function updatePriceCheck() {
     Area average for old dwellings, not a valuation of this flat.</p>`;
 }
 
-// The chart is only drawn while the Prices tab is visible (and redrawn only when the postal code changes)
+// The chart is only drawn while the Area tab is visible (and redrawn only when the postal code changes)
 function refreshPriceChart() {
-  if (!document.getElementById('tabPrice').classList.contains('active') || chartPostal === selectedPostal) return;
+  if (!document.getElementById('tabArea').classList.contains('active') || chartPostal === selectedPostal) return;
   chartPostal = selectedPostal;
   renderPriceChart(selectedPostal);
 }
@@ -615,6 +615,66 @@ function renderEnvironment(p) {
     ${renderPower(p)}
     <h4 class="sub-title">Indoor radon (postal code ${esc(p.postalCode || '—')})</h4>
     ${radonHtml(p.postalCode)}`;
+  document.getElementById('aiSuggestion').innerHTML = '';
+}
+
+// AI suggestion for the Environment tab: the agent's API (agent/backend) reads the facts shown below it
+// and searches news / official press releases about the address (Articles MCP, see agent/articles.md)
+const AGENT_API = window.PASILA_CONFIG.agentApi;
+const AGENT_MAX_MESSAGE = 4000; // /chat rejects longer messages
+
+// Agent replies are Markdown: escape, then render headings, bullets, bold and clickable links
+const inlineMd = (line) => line
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<)]*[^\s<).,;:!?])/g,
+    (m, label, url, bare) => `<a href="${url || bare}" target="_blank" rel="noopener noreferrer">${label || bare}</a>`);
+
+function renderMarkdown(text) {
+  let html = '', inList = false;
+  for (const raw of esc(text).split('\n')) {
+    const line = raw.trim();
+    const item = line.match(/^[-*]\s+(.*)/);
+    if (inList && !item) { html += '</ul>'; inList = false; }
+    if (item) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${inlineMd(item[1])}</li>`;
+    } else if (/^#{1,6}\s/.test(line)) {
+      html += `<h5 class="detail-heading">${inlineMd(line.replace(/^#+\s*/, ''))}</h5>`;
+    } else if (line) {
+      html += `<p>${inlineMd(line)}</p>`;
+    }
+  }
+  return html + (inList ? '</ul>' : '');
+}
+
+async function requestAiSuggestion() {
+  const id = activeId;
+  const p = layersOf(id)[0]?.feature.properties;
+  if (!p) return;
+  const out = document.getElementById('aiSuggestion');
+  const btn = document.getElementById('aiSuggestBtn');
+  const intro = `Building at ${p.address || titleOf(p)}, postal code ${p.postalCode || '—'} Helsinki (VTJ-PRT ${p.vtj || '—'}).\n` +
+    'Environment data from official sources:\n';
+  const ask = '\n\nIn at most 2 short plain sentences (under 45 words in total), no bullet points or headings, summarize the most important findings ' +
+    'about this building and its surroundings, including verified news or official press releases about incidents at this address. ' +
+    'State facts only: do not judge whether it is a good or suitable place to live and do not give advice. Use only the data given and what the tools return.';
+  const facts = document.getElementById('envContainer').innerText.slice(0, AGENT_MAX_MESSAGE - intro.length - ask.length);
+  btn.disabled = true;
+  out.innerHTML = '<p class="muted">Asking the AI assistant… searching articles can take a minute.</p>';
+  try {
+    const res = await fetch(`${AGENT_API}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: intro + facts + ask })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    if (activeId === id) out.innerHTML = renderMarkdown(data.reply);
+  } catch (e) {
+    if (activeId === id) out.innerHTML = `<p class="muted">Could not reach the AI assistant at ${esc(AGENT_API)}. Start the agent backend and try again. (${esc(e.message)})</p>`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderWater(p) {
@@ -776,7 +836,7 @@ const panelsFitSideBySide = () => window.matchMedia('(min-width: 1100px)').match
 
 function setAssistantOpen(open) {
   const frame = document.getElementById('assistantFrame');
-  if (open && !frame.src) frame.src = frame.dataset.src;   // load the agent's UI only when first opened
+  if (open && !frame.src) frame.src = window.PASILA_CONFIG.agentUi;   // load the agent's UI only when first opened
   document.getElementById('assistantPanel').classList.toggle('open', open);
   document.body.classList.toggle('assistant-open', open);
   if (open && !panelsFitSideBySide()) closeSidebar();
@@ -930,9 +990,10 @@ function setupEventListeners() {
   // Replies posted by the agent's UI in the iframe (see README): accept only that frame and origin
   window.addEventListener('message', (e) => {
     const frame = document.getElementById('assistantFrame');
-    if (e.source !== frame.contentWindow || e.origin !== new URL(frame.dataset.src).origin) return;
+    if (e.source !== frame.contentWindow || e.origin !== new URL(window.PASILA_CONFIG.agentUi).origin) return;
     if (e.data?.type === 'assistant:reply' && typeof e.data.text === 'string') focusMentions(e.data.text);
   });
+  document.getElementById('aiSuggestBtn').addEventListener('click', requestAiSuggestion);
   ['pcPrice', 'pcSize', 'pcRooms'].forEach(id => document.getElementById(id).addEventListener('input', updatePriceCheck));
   document.querySelectorAll('.postal-select').forEach(sel =>
     sel.addEventListener('change', () => selectPostal(sel.value || null)));

@@ -84,7 +84,7 @@
         <span><i class="fa-solid fa-robot"></i> Assistant</span>
         <button class="close-sidebar-btn" id="closeAssistantBtn" title="Close assistant"><i class="fa-solid fa-xmark"></i></button>
       </div>
-      <iframe id="assistantFrame" title="AI assistant" data-src="http://localhost:3000"></iframe>
+      <iframe id="assistantFrame" title="AI assistant"></iframe>
     </aside>
 
     <!-- Building Panel (Sidebar) -->
@@ -111,7 +111,7 @@
         <button class="panel-tab active" data-tab="tabSpecs"><i class="fa-solid fa-building"></i> Building</button>
         <button class="panel-tab" data-tab="tabArea"><i class="fa-solid fa-people-roof"></i> Area</button>
         <button class="panel-tab" data-tab="tabHistory"><i class="fa-solid fa-screwdriver-wrench"></i> Permits</button>
-        <button class="panel-tab" data-tab="tabPrice"><i class="fa-solid fa-chart-line"></i> Prices</button>
+        <button class="panel-tab" data-tab="tabArticles"><i class="fa-solid fa-newspaper"></i> Articles</button>
         <button class="panel-tab" data-tab="tabNews"><i class="fa-solid fa-map"></i> Plans</button>
         <button class="panel-tab" data-tab="tabEnv"><i class="fa-solid fa-volume-high"></i> Environment</button>
       </div>
@@ -135,6 +135,39 @@
           <h3 class="section-title"><i class="fa-solid fa-people-roof"></i> Postal code area statistics</h3>
           <label class="postal-pick">Postal code area <select class="postal-select" aria-label="Postal code area"></select></label>
           <div id="areaContainer"></div>
+
+          <!-- Price history (Statistics Finland) for the same postal code -->
+          <div id="areaPrices">
+            <h3 class="section-title"><i class="fa-solid fa-chart-line"></i> Prices of old dwellings</h3>
+            <div class="price-header">
+              <div>
+                <span class="price-sub" id="priceSub">—</span>
+                <h4 class="price-highlight" id="priceHighlight">—</h4>
+              </div>
+              <span class="trend-badge" id="priceTrend"></span>
+            </div>
+            <div class="chart-container">
+              <canvas id="priceHistoryChart"></canvas>
+            </div>
+            <p class="chart-footnote">Area prices of old flats, not this building. Statistics Finland 13mu.</p>
+
+            <div class="price-check">
+              <h5 class="detail-heading">Check an asking price</h5>
+              <p class="muted">Looking at a listing for a flat here? Enter its price and size to compare it with the area average. Nothing is sent or stored.</p>
+              <div class="price-check-form">
+                <label>Asking price (€)<input id="pcPrice" type="number" min="0" step="1000" inputmode="numeric" placeholder="e.g. 320000"></label>
+                <label>Size (m²)<input id="pcSize" type="number" min="0" step="0.5" inputmode="decimal" placeholder="e.g. 52"></label>
+                <label>Rooms
+                  <select id="pcRooms">
+                    <option value="1">1 room</option>
+                    <option value="2" selected>2 rooms</option>
+                    <option value="3">3+ rooms</option>
+                  </select>
+                </label>
+              </div>
+              <div id="pcResult" class="pc-result"></div>
+            </div>
+          </div>
         </section>
 
         <!-- TAB 3: Permit & renovation timeline -->
@@ -143,37 +176,10 @@
           <div class="timeline" id="permitTimeline"></div>
         </section>
 
-        <!-- TAB 4: Price history (Statistics Finland) -->
-        <section id="tabPrice" class="tab-body">
-          <label class="postal-pick">Postal code area <select class="postal-select" aria-label="Postal code area"></select></label>
-          <div class="price-header">
-            <div>
-              <span class="price-sub" id="priceSub">—</span>
-              <h4 class="price-highlight" id="priceHighlight">—</h4>
-            </div>
-            <span class="trend-badge" id="priceTrend"></span>
-          </div>
-          <div class="chart-container">
-            <canvas id="priceHistoryChart"></canvas>
-          </div>
-          <p class="chart-footnote">Area prices of old flats, not this building. Statistics Finland 13mu.</p>
-
-          <div class="price-check">
-            <h5 class="detail-heading">Check an asking price</h5>
-            <p class="muted">Looking at a listing for a flat here? Enter its price and size to compare it with the area average. Nothing is sent or stored.</p>
-            <div class="price-check-form">
-              <label>Asking price (€)<input id="pcPrice" type="number" min="0" step="1000" inputmode="numeric" placeholder="e.g. 320000"></label>
-              <label>Size (m²)<input id="pcSize" type="number" min="0" step="0.5" inputmode="decimal" placeholder="e.g. 52"></label>
-              <label>Rooms
-                <select id="pcRooms">
-                  <option value="1">1 room</option>
-                  <option value="2" selected>2 rooms</option>
-                  <option value="3">3+ rooms</option>
-                </select>
-              </label>
-            </div>
-            <div id="pcResult" class="pc-result"></div>
-          </div>
+        <!-- TAB 4: Articles related to the area (not implemented yet) -->
+        <section id="tabArticles" class="tab-body">
+          <h3 class="section-title"><i class="fa-solid fa-newspaper"></i> Articles</h3>
+          <div class="news-list" id="articlesList"></div>
         </section>
 
         <!-- TAB 5: Detailed plans & events -->
@@ -184,7 +190,14 @@
 
         <!-- TAB 6: Traffic noise & environmental permit facilities -->
         <section id="tabEnv" class="tab-body">
-          <h3 class="section-title"><i class="fa-solid fa-volume-high"></i> Environment around the building</h3>
+          <h3 class="section-title">Environment around the building</h3>
+          <!-- AI suggestion: written by the agent (agent/backend) from the data below, on request -->
+          <div class="ai-suggestion">
+            <h4 class="sub-title"><i class="fa-solid fa-wand-magic-sparkles"></i> AI suggestion</h4>
+            <p class="muted">Written by the AI assistant from the environment data below and a search of news and official press releases about this address. Not official data; check the linked sources.</p>
+            <button class="btn btn-outline env-site-btn" id="aiSuggestBtn"><i class="fa-solid fa-wand-magic-sparkles"></i> Get suggestion</button>
+            <div class="ai-suggestion-text" id="aiSuggestion"></div>
+          </div>
           <div id="envContainer"></div>
         </section>
       </div>
@@ -292,6 +305,7 @@
   <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="data/pasila-data.js?v=1792295000"></script>
-  <script src="app.js?v=8.6"></script>
+  <script src="config.js?v=1"></script>
+  <script src="app.js?v=8.7"></script>
 </body>
 </html>
