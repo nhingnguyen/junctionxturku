@@ -1,4 +1,4 @@
-# Property Checker Platform – Technical & Data Report
+# Property Tracker Platform – Technical & Data Report
 
 A web map of the Pasila district (Helsinki). Click a building to see its details, building-permit history, area price development, postal-area statistics, detailed plans, nearby events, traffic noise and the nearest environmental permit facility. An optional AI assistant panel can focus the map on the places it names (§9). Only official open data with a verified licence is used (§6). The app is English-only: it uses the official English labels published by the sources; values without an official translation are shown in Finnish (see §5.1).
 

@@ -1,4 +1,4 @@
-# Property Checker Platform
+# Property Tracker Platform
 
 An interactive map of the Pasila district in Helsinki. Click a building to see its details (including heating and recorded network connections), building-permit history, area price trends, postal-area statistics (including household income), detailed plans, nearby events, traffic noise, the nearest environmental permit facility, HSY water-supply disruptions, flood hazard zones (Syke), sea level estimates at the nearest shoreline point (FMI), fire and rescue facts with the nearest rescue station, electricity supply (operator, legal maximum outage, operator outage and cabling figures from Energiavirasto) and indoor radon by postal code (STUK). Postal-area statistics, prices and radon cover every postal code area that touches the map area. Each value is fetched from its publisher when the data is built (see REPORT.md); HSY, STUK and Energiavirasto's indicator workbook publish no licence and are used on request, everything else is CC BY 4.0.
 
