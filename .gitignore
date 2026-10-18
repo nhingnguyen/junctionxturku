@@ -6,3 +6,10 @@ token.json
 
 RYHTI_API_TEST_REPORT.md
 .review
+
+# Local checkout of dev/Docker for testing (git worktree)
+dev-docker/
+
+# Python cache
+__pycache__/
+*.py[cod]

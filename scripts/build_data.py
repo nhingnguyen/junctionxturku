@@ -13,11 +13,14 @@ Only official open data with a verified licence is used, every source is CC BY 4
   - Prices of old dwellings by postal code    Statistics Finland PxWeb  StatFin/ashi/13mu
   - Postal code area statistics (Paavo)       Statistics Finland PxWeb  Postinumeroalueittainen_avoin_tieto/12f7
   - Events                                    Linked Events API (api.hel.fi)                    (hri.fi: linked-events-tapahtumarajapinta)
+  - Traffic noise zones (2022 survey, Lden)   kartta.hel.fi WFS  Meluselvitys_2022_Helsinki_*_Lden  (hri.fi: helsingin-kaupungin-meluselvitys-2017)
+  - Environmental permit facilities           kartta.hel.fi WFS  Ymparistolupakohteet               (hri.fi: helsingin-ymparistolupakohteet)
   - Classification of Buildings 2018          Statistics Finland classifications API (data.stat.fi)
   - Helsinki register code explanations       scripts/helsinki_building_codes.json (from the helsingin-rakennukset dataset)
   - Permit type labels (codes 01-05)          scripts/ryhti_permit_codes.json (from Syke's CC BY repo sykefi/rakennuskohteet)
 
 Code-list labels from koodistot.suomi.fi are NOT used: the service publishes no licence for its content.
+HSY's water-supply disruption map (ArcGIS Julkinen_Hairiokartta_katselu) is NOT used for the same reason.
 
 The app is English-only. Official English labels are used wherever the source publishes them;
 values without an official translation stay in Finnish and are listed at the end of the build
@@ -25,6 +28,7 @@ values without an official translation stay in Finnish and are listed at the end
 """
 import json
 import re
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -127,6 +131,82 @@ def in_bbox(x, y):
     return BBOX[0] <= x <= BBOX[2] and BBOX[1] <= y <= BBOX[3]
 
 
+def _segments_cross(a, b, c, d):
+    def orient(p, q, r):
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    return (orient(a, b, c) > 0) != (orient(a, b, d) > 0) and (orient(c, d, a) > 0) != (orient(c, d, b) > 0)
+
+
+class EdgeIndex:
+    """Edges of a large (Multi)Polygon bucketed into latitude rows, for fast tests against small footprints."""
+    ROW = 0.0002  # degrees of latitude (about 22 m)
+
+    def __init__(self, geom):
+        self.geom = geom
+        self.bounds = bounds_of(geom)
+        self.rows = {}
+        for poly in polygons_of(geom):
+            for r in poly:
+                for i in range(len(r) - 1):
+                    a, b = r[i], r[i + 1]
+                    for row in range(int(min(a[1], b[1]) / self.ROW), int(max(a[1], b[1]) / self.ROW) + 1):
+                        self.rows.setdefault(row, []).append((a, b))
+
+    def edges_near(self, x0, y0, x1, y1):
+        seen = set()
+        for row in range(int(y0 / self.ROW), int(y1 / self.ROW) + 1):
+            for e in self.rows.get(row, ()):
+                a, b = e
+                if id(e) in seen or max(a[0], b[0]) < x0 or min(a[0], b[0]) > x1 \
+                        or max(a[1], b[1]) < y0 or min(a[1], b[1]) > y1:
+                    continue
+                seen.add(id(e))
+                yield a, b
+
+    def contains(self, x, y):
+        """Ray casting over the edges in the point's row (all rings, so holes are respected)."""
+        inside = False
+        for a, b in self.rows.get(int(y / self.ROW), ()):
+            if (a[1] > y) != (b[1] > y) and x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]:
+                inside = not inside
+        return inside
+
+
+def intersects_indexed(geom, zone):
+    """True if a small (Multi)Polygon overlaps the indexed zone polygon (holes respected)."""
+    x0, y0, x1, y1 = bounds_of(geom)
+    zx0, zy0, zx1, zy1 = zone.bounds
+    if x1 < zx0 or x0 > zx1 or y1 < zy0 or y0 > zy1:
+        return False
+    edges = [(r[i], r[i + 1]) for poly in polygons_of(geom) for r in poly for i in range(len(r) - 1)]
+    for c, d in zone.edges_near(x0, y0, x1, y1):
+        if point_in_geom(c[0], c[1], geom) or any(_segments_cross(a, b, c, d) for a, b in edges):
+            return True
+    # No boundary contact: the footprint lies wholly inside or wholly outside the zone
+    v = edges[0][0]
+    return zone.contains(v[0], v[1])
+
+
+M_PER_DEG_LAT = 110574
+M_PER_DEG_LON = 111320 * 0.4977  # cos(60.2°): planar metres are accurate to <1% inside the BBOX
+
+
+def distance_m(x, y, geom):
+    """Distance in metres from a point to a polygon (0 if the point is inside)."""
+    if point_in_geom(x, y, geom):
+        return 0
+    best = float("inf")
+    for poly in polygons_of(geom):
+        for r in poly:
+            for i in range(len(r) - 1):
+                ax, ay = (r[i][0] - x) * M_PER_DEG_LON, (r[i][1] - y) * M_PER_DEG_LAT
+                bx, by = (r[i + 1][0] - x) * M_PER_DEG_LON, (r[i + 1][1] - y) * M_PER_DEG_LAT
+                dx, dy = bx - ax, by - ay
+                t = max(0, min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy))) if dx or dy else 0
+                best = min(best, ((ax + t * dx) ** 2 + (ay + t * dy) ** 2) ** 0.5)
+    return best
+
+
 # ---------- Labels ----------
 
 _codelists = {}  # (source, scheme) -> {code: {"fi": ..., "en": ...}}
@@ -170,8 +250,8 @@ def building_class(code, fallback_fi):
 
 # ---------- Fetchers ----------
 
-def fetch_wfs(layer):
-    minx, miny, maxx, maxy = BBOX
+def fetch_wfs(layer, bbox=BBOX):
+    minx, miny, maxx, maxy = bbox
     params = {
         "service": "WFS", "version": "2.0.0", "request": "GetFeature",
         "typeName": f"avoindata:{layer}", "outputFormat": "application/json", "srsName": "EPSG:4326",
@@ -179,6 +259,20 @@ def fetch_wfs(layer):
         "bbox": f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326",
     }
     return get_json("https://kartta.hel.fi/ws/geoserver/avoindata/wfs?" + urllib.parse.urlencode(params))["features"]
+
+
+# Noise zones of the City of Helsinki noise survey 2022 (Lden, day-evening-night level)
+NOISE_LAYERS = {
+    "road": "Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden",
+    "rail": "Meluselvitys_2022_Helsinki_rautatiet_Lden",
+    "tram": "Meluselvitys_2022_Helsinki_raitiotie_Lden",
+}
+
+# Environmental permit facilities are fetched this far beyond the BBOX, so the nearest one found
+# for a building is the true nearest whenever it lies within this distance
+PERMIT_SITE_RADIUS_M = 1000
+PERMIT_SITE_BBOX = [BBOX[0] - PERMIT_SITE_RADIUS_M / M_PER_DEG_LON, BBOX[1] - PERMIT_SITE_RADIUS_M / M_PER_DEG_LAT,
+                    BBOX[2] + PERMIT_SITE_RADIUS_M / M_PER_DEG_LON, BBOX[3] + PERMIT_SITE_RADIUS_M / M_PER_DEG_LAT]
 
 
 def fetch_ogc(path):
@@ -320,7 +414,7 @@ def plot_info(p):
     })
 
 
-def build(footprints, ryhti, addresses, permits, protected, plans, plots):
+def build(footprints, ryhti, addresses, permits, protected, plans, plots, noise, permit_sites):
     ryhti_by_vtj = {f["properties"]["permanent_building_identifier"]: f for f in ryhti}
     ryhti_points = [(k, *f["geometry"]["coordinates"]) for k, f in ryhti_by_vtj.items()]
     addr_by_key = {}
@@ -391,6 +485,44 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
             continue
         groups.setdefault(vtj, []).append(f)
 
+    # Noise: per layer, the highest published Lden zone that any footprint of the building touches
+    noise_zones = {kind: [(EdgeIndex(z["geometry"]), z["properties"])
+                          for z in sorted(zs, key=lambda z: -(z["properties"].get("db_lo") or 0))
+                          if polygons_of(z["geometry"])]
+                   for kind, zs in noise.items()}
+
+    def noise_of(parts):
+        out = {}
+        for kind, zones in noise_zones.items():
+            hit = next((zp for zone, zp in zones if any(intersects_indexed(p["geometry"], zone) for p in parts)), None)
+            if hit:
+                out[kind] = [hit.get("db_lo"), hit.get("db_hi")]
+        return out
+
+    # Nearest environmental permit facility, measured from the footprint edge
+    sites = [s for s in permit_sites if (s.get("geometry") or {}).get("type") == "Point"]
+    sites_used = {}
+
+    def permit_site_of(parts):
+        best = None
+        for site in sites:
+            x, y = site["geometry"]["coordinates"][:2]
+            d = min(distance_m(x, y, part["geometry"]) for part in parts)
+            if best is None or d < best[0]:
+                best = (d, site)
+        if not best or best[0] > PERMIT_SITE_RADIUS_M:
+            return None
+        sp = best[1]["properties"]
+        sid = str(sp["id"])
+        if sid not in sites_used:
+            sites_used[sid] = prune({
+                "name": sp.get("nimi"), "address": sp.get("katuosoite"), "postOffice": sp.get("postitoimipaikka"),
+                "activity": english(sp.get("toiminnan_luokittelun_tarkenne")),
+                "updated": d10(sp.get("paivitetty_tietopalveluun")),
+                "lonlat": [round(c, 6) for c in best[1]["geometry"]["coordinates"][:2]],
+            })
+        return {"id": sid, "m": round(best[0])}
+
     # 2) Building attributes per VTJ-PRT. Footprint geometries are passed through exactly as
     #    published by the City of Helsinki: one feature per footprint, never merged or rounded.
     features = []
@@ -460,6 +592,8 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
             "plot": plot_info(plot) if plot else None,
             "plans": sorted(plans_here, key=lambda i: plans_used[i].get("inForce") or "9999", reverse=True),
             "history": sorted(permits_by_vtj.get(vtj, []), key=lambda x: x["decision"] or x["start"] or "", reverse=True),
+            "noise": noise_of(parts),
+            "permitSite": permit_site_of(parts),
         }
         for part in parts:
             features.append({"type": "Feature", "geometry": part["geometry"],
@@ -471,10 +605,12 @@ def build(footprints, ryhti, addresses, permits, protected, plans, plots):
         if in_bbox(*centroid(f["geometry"])):
             stats["context"] += 1
             context_feats.append({"type": "Feature", "geometry": f["geometry"], "properties": {}})
-    return features, context_feats, plans_used, stats
+    return features, context_feats, plans_used, sites_used, stats
 
 
 def main():
+    # Finnish names in the log must not crash a console with a legacy code page (e.g. cp1252 on Windows)
+    sys.stdout.reconfigure(errors="replace")
     started = time.time()
     print("BBOX", BBOX)
     steps = {
@@ -483,6 +619,8 @@ def main():
         "plans in force": lambda: fetch_wfs("Kaavahakemisto_alue_kaava_voimassa"),
         "plans pending": lambda: fetch_wfs("Kaavahakemisto_alue_kaava_vireilla"),
         "plan units": lambda: fetch_wfs("Kaavayksikot"),
+        **{f"noise {k}": (lambda layer=layer: fetch_wfs(layer)) for k, layer in NOISE_LAYERS.items()},
+        "permit sites": lambda: fetch_wfs("Ymparistolupakohteet", PERMIT_SITE_BBOX),
         "ryhti buildings": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_building"),
         "ryhti addresses": lambda: fetch_ogc("ryhti_building/ogc/features/v1/collections/open_address"),
         "ryhti permits": lambda: fetch_ogc("ryhti_permit/ogc/features/v1/collections/open_permit_building"),
@@ -505,9 +643,10 @@ def main():
         for job in code_jobs:
             job.result()
 
-    features, context, plans, stats = build(got["footprints"], got["ryhti buildings"], got["ryhti addresses"],
-                                     got["ryhti permits"], got["protected"],
-                                     got["plans in force"] + got["plans pending"], got["plan units"])
+    noise = {k: got[f"noise {k}"] for k in NOISE_LAYERS}
+    features, context, plans, permit_sites, stats = build(
+        got["footprints"], got["ryhti buildings"], got["ryhti addresses"], got["ryhti permits"], got["protected"],
+        got["plans in force"] + got["plans pending"], got["plan units"], noise, got["permit sites"])
     print("  join:", stats, "-> footprints", len(features))
 
     postal = sorted({f["properties"]["postalCode"] for f in features if f["properties"].get("postalCode")})
@@ -525,6 +664,11 @@ def main():
         "prices": prices,
         "paavo": paavo,
         "events": prune(got["events"]),
+        "noiseSurvey": {"year": 2022, "metric": "Lden",
+                        "updated": max((d10(z["properties"].get("paivitetty_tietopalveluun")) or ""
+                                        for zs in noise.values() for z in zs), default=None) or None},
+        "permitSites": permit_sites,
+        "permitSiteRadius": PERMIT_SITE_RADIUS_M,
         "joinStats": stats,
     }
     OUT.parent.mkdir(exist_ok=True)

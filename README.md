@@ -1,6 +1,6 @@
 # Pasila Intelligence
 
-An interactive map of the Pasila district in Helsinki. Click a building to see its details, building-permit history, area price trends, postal-area statistics, detailed plans and nearby events. The app uses only official open data (CC BY 4.0).
+An interactive map of the Pasila district in Helsinki. Click a building to see its details, building-permit history, area price trends, postal-area statistics, detailed plans, nearby events, traffic noise and the nearest environmental permit facility. The app uses only official open data (CC BY 4.0).
 
 ## Project structure
 
@@ -35,7 +35,7 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
    python scripts/build_data.py
    ```
 
-   This takes about 5–10 seconds. It downloads building, permit, price, statistics and event data for the Pasila area and writes `data/pasila-data.js`. On macOS/Linux use `python3` if `python` points to Python 2.
+   This takes about 30 seconds. It downloads building, permit, price, statistics and event data for the Pasila area and writes `data/pasila-data.js`. On macOS/Linux use `python3` if `python` points to Python 2.
 
 3. **Start a local web server**
 
@@ -45,7 +45,55 @@ An interactive map of the Pasila district in Helsinki. Click a building to see i
 
 4. **Open the app** at **http://localhost:8000**
 
-## Updating the data
+## AI assistant (optional)
+
+The **Assistant** button in the header opens a panel that shows the agent's own chat UI. The agent (Next.js frontend, backend, LLM and Ryhti MCP server) lives on the `dev/Docker` branch and runs separately.
+
+1. Check out `dev/Docker` (for example into `dev-docker/`, which is git-ignored):
+
+   ```bash
+   git fetch origin
+   git worktree add --detach dev-docker origin/dev/Docker
+   ```
+
+2. Start the backend (API on `http://localhost:4000`) with an Ollama API key:
+
+   ```bash
+   cd dev-docker
+   OLLAMA_API_KEY=<your key> docker compose up --build
+   ```
+
+3. Start the agent's frontend (on `http://localhost:3000`):
+
+   ```bash
+   cd dev-docker/frontend
+   npm install
+   npm run dev
+   ```
+
+4. Open the app and click **Assistant**.
+
+If the frontend runs at another address, change `data-src` on `#assistantFrame` in `index.html`.
+
+### Map focus on the assistant's replies
+
+When the agent's UI posts a reply to this page, the map focuses on the places it names. The agent's UI has to send each reply with:
+
+```ts
+window.parent?.postMessage({ type: "assistant:reply", text: data.reply }, "http://localhost:8000");
+```
+
+The second argument is this app's address, so no other page can receive the replies. Open the app at exactly `http://localhost:8000` (not `127.0.0.1`), or change that address when the app is deployed.
+
+Only messages from the assistant iframe's origin are accepted. The reply is matched against the official data only, in this order:
+
+1. VTJ-PRT (permanent building identifier) and property ID (kiinteistötunnus)
+2. Street address, e.g. `Palkkatilankatu 8` (all buildings at that address unless a VTJ-PRT narrows it down)
+3. If no building is named: a street name, then a postal code area
+
+One building opens its panel (on narrow screens it is highlighted instead, so the assistant stays open); several are highlighted in purple with a bar naming what was matched.
+
+## Updating the data## Updating the data
 
 The dataset is a snapshot. Re-run `python scripts/build_data.py` whenever you want fresh data. The snapshot date is shown in the app header.
 
@@ -75,6 +123,7 @@ Then rebuild. Building footprints come from the City of Helsinki, so the area mu
 | City of Helsinki (kartta.hel.fi) | Building footprints, register data, protection, detailed plans, aerial photo, base map | CC BY 4.0 |
 | Ryhti / Syke | Building attributes, addresses, building permits | CC BY 4.0 |
 | Statistics Finland | Prices of old dwellings by postal code, Paavo area statistics | CC BY 4.0 |
+| City of Helsinki (kartta.hel.fi) | Traffic noise zones (2022 survey, Lden), environmental permit facilities | CC BY 4.0 |
 | Linked Events (City of Helsinki) | Events | CC BY 4.0 |
 | OpenStreetMap | Base map tiles | ODbL |
 

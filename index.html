@@ -17,7 +17,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="style.css?v=7.2">
+  <link rel="stylesheet" href="style.css?v=7.4">
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -31,7 +31,7 @@
       </div>
       <div class="brand-text">
         <h1>Pasila Intelligence</h1>
-        <p class="subtitle">Open data: City of Helsinki, Ryhti (Syke) &amp; Statistics Finland</p>
+        <p class="subtitle"><i class="fa-solid fa-location-dot"></i> Pasila, Helsinki · official open data</p>
       </div>
     </div>
 
@@ -51,18 +51,14 @@
         <span class="status-dot online"></span>
         <span class="badge-text">Data snapshot: <span id="dataDate">—</span></span>
       </div>
+      <button class="btn btn-outline" id="assistantBtn" title="Ask the AI assistant">
+        <i class="fa-solid fa-robot"></i> <span class="btn-label">Assistant</span>
+      </button>
       <button class="btn btn-outline" id="legalBtn" title="Data sources and licences">
-        <i class="fa-solid fa-scale-balanced"></i> Sources &amp; Licences
+        <i class="fa-solid fa-scale-balanced"></i> <span class="btn-label">Sources &amp; Licences</span>
       </button>
     </div>
   </header>
-
-  <!-- Area Bar -->
-  <div class="filter-bar">
-    <div class="area-indicator">
-      <i class="fa-solid fa-location-dot"></i> <strong>Pasila, Helsinki</strong>
-    </div>
-  </div>
 
   <!-- Main Workspace -->
   <main class="main-container">
@@ -74,6 +70,22 @@
       <div class="spinner"></div>
       <p>Loading building data...</p>
     </div>
+
+    <!-- Places named in the assistant's last reply -->
+    <div id="mentionBar" class="mention-bar" hidden>
+      <i class="fa-solid fa-robot"></i>
+      <span id="mentionText"></span>
+      <button id="clearMentionsBtn" title="Clear highlight"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+
+    <!-- AI Assistant Panel: the agent's own UI (dev/Docker frontend), loaded on first open -->
+    <aside id="assistantPanel" class="assistant-panel" aria-label="AI assistant">
+      <div class="assistant-bar">
+        <span><i class="fa-solid fa-robot"></i> Assistant</span>
+        <button class="close-sidebar-btn" id="closeAssistantBtn" title="Close assistant"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <iframe id="assistantFrame" title="AI assistant" data-src="http://localhost:3000"></iframe>
+    </aside>
 
     <!-- Building Panel (Sidebar) -->
     <aside id="buildingSidebar" class="building-sidebar">
@@ -101,6 +113,7 @@
         <button class="panel-tab" data-tab="tabHistory"><i class="fa-solid fa-screwdriver-wrench"></i> Permits</button>
         <button class="panel-tab" data-tab="tabPrice"><i class="fa-solid fa-chart-line"></i> Prices</button>
         <button class="panel-tab" data-tab="tabNews"><i class="fa-solid fa-map"></i> Plans</button>
+        <button class="panel-tab" data-tab="tabEnv"><i class="fa-solid fa-volume-high"></i> Environment</button>
       </div>
 
       <!-- Tab Contents -->
@@ -166,6 +179,12 @@
           <h3 class="section-title"><i class="fa-solid fa-bullhorn"></i> Detailed plans &amp; events around the building</h3>
           <div class="news-list" id="newsList"></div>
         </section>
+
+        <!-- TAB 6: Traffic noise & environmental permit facilities -->
+        <section id="tabEnv" class="tab-body">
+          <h3 class="section-title"><i class="fa-solid fa-volume-high"></i> Environment around the building</h3>
+          <div id="envContainer"></div>
+        </section>
       </div>
     </aside>
   </main>
@@ -214,6 +233,15 @@
         <div class="license-item">
           <div class="license-badge cc">CC BY 4.0</div>
           <div class="license-info">
+            <h4>Traffic noise zones, environmental permit facilities – City of Helsinki</h4>
+            <p>WFS kartta.hel.fi: <em>Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden</em>, <em>…_rautatiet_Lden</em>, <em>…_raitiotie_Lden</em>, <em>Ymparistolupakohteet</em>. © Helsingin kaupunki, CC BY 4.0 (HRI:
+            <a href="https://hri.fi/data/fi/dataset/helsingin-kaupungin-meluselvitys-2017" target="_blank">noise survey</a>,
+            <a href="https://hri.fi/data/fi/dataset/helsingin-ymparistolupakohteet" target="_blank">environmental permits</a>). Noise bands and activity classifications are shown as published.</p>
+          </div>
+        </div>
+        <div class="license-item">
+          <div class="license-badge cc">CC BY 4.0</div>
+          <div class="license-info">
             <h4>Events – Linked Events (City of Helsinki)</h4>
             <p>api.hel.fi/linkedevents (<a href="https://hri.fi/data/fi/dataset/linked-events-tapahtumarajapinta" target="_blank">HRI</a>).</p>
           </div>
@@ -241,7 +269,7 @@
 
   <!-- Scripts -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="data/pasila-data.js?v=1792269065"></script>
-  <script src="app.js?v=7.5"></script>
+  <script src="data/pasila-data.js?v=1792279854"></script>
+  <script src="app.js?v=7.6"></script>
 </body>
 </html>

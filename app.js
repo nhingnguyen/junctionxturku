@@ -30,7 +30,8 @@ const STYLE = {
   context: { color: '#64748b', fillColor: '#64748b', fillOpacity: 0.12, weight: 0.5, dashArray: '2 2' },
   planHalo:{ color: '#ffffff', weight: 7, opacity: 0.9, fill: false },
   plan:    { color: '#ff1f8f', fillColor: '#ff1f8f', fillOpacity: 0.12, weight: 3.5 },
-  active:  { color: '#facc15', fillColor: '#facc15', fillOpacity: 0.7,  weight: 3 }
+  active:  { color: '#facc15', fillColor: '#facc15', fillOpacity: 0.7,  weight: 3 },
+  mention: { color: '#7e22ce', fillColor: '#c084fc', fillOpacity: 0.65, weight: 2.5 }
 };
 
 let map = null;
@@ -41,6 +42,7 @@ let layerIndex = new Map();   // building id -> its footprint layers
 let selectedPostal = null;
 let chartPostal;              // postal code the price chart was last drawn for
 let planLayer = null;         // outline of the detailed plan opened in the Plans tab
+let mentionedIds = new Set(); // buildings named in the assistant's last reply
 
 document.addEventListener('DOMContentLoaded', () => {
   initMap();
@@ -79,9 +81,13 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
 
 const normAddr = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 
+// Normalized address -> ids of every building carrying it (the first one is the search match)
 function buildAddressIndex() {
   const index = new Map();
-  const add = (key, id) => { if (!index.has(key)) index.set(key, id); };
+  const add = (key, id) => {
+    const ids = index.get(key) || index.set(key, []).get(key);
+    if (!ids.includes(id)) ids.push(id);
+  };
   BUILDINGS.forEach(p => {
     [p.address, ...(p.otherAddresses || [])].filter(Boolean).forEach(a => {
       const n = normAddr(a);
@@ -109,7 +115,7 @@ function resolveAddress(text) {
   const withLetter = letter ? `${base}${letter.toLowerCase()}` : null;
   const staircase = letter && gap && letter === letter.toUpperCase();
   const order = staircase ? [base, withLetter] : [withLetter, base];
-  for (const key of order) if (key && ADDRESS_INDEX.has(key)) return ADDRESS_INDEX.get(key);
+  for (const key of order) if (key && ADDRESS_INDEX.has(key)) return ADDRESS_INDEX.get(key)[0];
   return null;
 }
 
@@ -197,7 +203,7 @@ function renderBuildings() {
   layerIndex = new Map();
 
   buildingLayer = L.geoJSON(DATA.buildings, {
-    style: (f) => isResidential(f.properties) ? STYLE.res : STYLE.other,
+    style: (f) => mentionedIds.has(f.properties.id) ? STYLE.mention : isResidential(f.properties) ? STYLE.res : STYLE.other,
     smoothFactor: 0, // keep every surveyed vertex; Leaflet simplifies outlines by default
     onEachFeature: (feature, layer) => {
       const p = feature.properties;
@@ -235,14 +241,10 @@ function selectBuilding(id) {
   activeId = id;
   layers.forEach(l => { l.setStyle(STYLE.active); l.bringToFront(); });
 
+  // On narrow screens the two panels cannot sit side by side: the building panel takes over
+  if (!panelsFitSideBySide()) setAssistantOpen(false);
   const bounds = L.featureGroup(layers).getBounds();
-  const sidebarWidth = document.getElementById('buildingSidebar').offsetWidth || 0;
-  map.flyToBounds(bounds, {
-    paddingTopLeft: [40, 40],
-    paddingBottomRight: [sidebarWidth + 40, 40],
-    maxZoom: 18,
-    duration: 0.6
-  });
+  map.flyToBounds(bounds, { ...mapPadding(true), maxZoom: 18, duration: 0.6 });
 
   document.getElementById('buildingTitle').textContent = titleOf(p);
   document.getElementById('buildingPostal').innerHTML =
@@ -262,6 +264,7 @@ function selectBuilding(id) {
   refreshPriceChart();
   updatePriceCheck();
   renderPlansAndEvents(p, bounds.getCenter());
+  renderEnvironment(p);
 
   document.getElementById('buildingSidebar').classList.add('open');
 }
@@ -503,7 +506,7 @@ function renderPlansAndEvents(p, center) {
         ['Set by detailed plan', plot.plan]
       ])}
       ${parcel.length > 1 ? `<div class="parcel-buildings"><span class="muted">Buildings on this property:</span>
-        ${parcel.map(b => `<button class="chip${b.id === p.id ? ' current' : ''}" data-select="${esc(b.id)}" title="VTJ-PRT ${esc(b.vtj)}">${esc(b.address || b.vtj)}${b.class ? ` · ${esc(b.class)}` : ''}</button>`).join('')}
+        ${parcel.map(b => `<button class="chip${b.id === p.id ? ' current' : ''}" data-select="${esc(b.id)}" title="${esc([b.address, b.class].filter(Boolean).join(' · '))}"><span class="chip-id">VTJ-PRT ${esc(b.vtj)}</span>${esc(parcelChipText(b))}</button>`).join('')}
       </div>` : ''}
     </div>` : `<p class="muted">No plot zoning found for this building.</p>`;
 
@@ -546,6 +549,57 @@ function renderPlansAndEvents(p, center) {
     <h4 class="sub-title">Events nearby (Linked Events)</h4>${eventsHtml}`;
 }
 
+// Noise zones (Helsinki noise survey) and the nearest environmental permit facility, as published
+const NOISE_SOURCES = [['road', 'Road traffic'], ['rail', 'Railway'], ['tram', 'Tram']];
+
+function renderEnvironment(p) {
+  const band = (z) => z ? (z[1] == null ? `${z[0]}+ dB` : `${z[0]}–${z[1]} dB`) : 'Not in a mapped zone';
+  const survey = DATA.noiseSurvey || {};
+  const site = p.permitSite && DATA.permitSites?.[p.permitSite.id];
+  const siteHtml = site ? `
+    ${detailGrid([
+      ['Name', site.name],
+      ['Address', [site.address, site.postOffice].filter(Boolean).join(', ')],
+      ['Activity (as registered)', site.activity],
+      ['Distance', `${fmtNum(p.permitSite.m)} m from the building footprint`]
+    ])}
+    <button class="btn btn-outline env-site-btn" onclick="showPermitSite('${esc(p.permitSite.id)}')"><i class="fa-solid fa-location-crosshairs"></i> Show on map</button>`
+    : `<p class="muted">No facility within ${fmtNum(DATA.permitSiteRadius || 0)} m.</p>`;
+
+  document.getElementById('envContainer').innerHTML = `
+    <h4 class="sub-title">Traffic noise (${esc(survey.metric || 'Lden')}, ${esc(survey.year || '')} survey)</h4>
+    <div class="specs-grid">
+      ${NOISE_SOURCES.map(([k, label]) => `
+        <div class="spec-card">
+          <span class="spec-label">${esc(label)}</span>
+          <span class="spec-value">${esc(band(p.noise?.[k]))}</span>
+        </div>`).join('')}
+    </div>
+    <p class="chart-footnote">The highest noise zone that touches the building footprint. Zones are modelled outdoor
+    day-evening-night levels and start at 45 dB; they are not indoor levels. Source: City of Helsinki noise survey ${esc(survey.year || '')}
+    (CC BY 4.0)${survey.updated ? `, updated ${fmtDate(survey.updated)}` : ''}.</p>
+    <h4 class="sub-title">Nearest environmental permit facility</h4>
+    ${siteHtml}
+    <p class="chart-footnote">Locations of activities in the City of Helsinki's environmental permit register (CC BY 4.0).
+    The register does not describe emissions or risk.</p>`;
+}
+
+// Mark an environmental permit facility on the map (uses the plan overlay slot, so only one overlay shows)
+function showPermitSite(id) {
+  clearPlan();
+  const site = DATA.permitSites?.[id];
+  if (!site?.lonlat) return;
+  const latlng = [site.lonlat[1], site.lonlat[0]];
+  planLayer = L.featureGroup([
+    L.circleMarker(latlng, { radius: 9, color: '#ffffff', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.9 })
+      .bindTooltip(site.name || 'Environmental permit facility', { permanent: true, direction: 'top', offset: [0, -8] })
+  ]).addTo(map);
+  const active = activeId && layersOf(activeId);
+  const bounds = L.latLngBounds([latlng]);
+  if (active) active.forEach(l => bounds.extend(l.getBounds()));
+  map.flyToBounds(bounds, { ...mapPadding(), maxZoom: 17, duration: 0.6 });
+}
+
 // Outline a detailed plan area on the map (geometry as published by the City of Helsinki)
 function showPlan(id) {
   clearPlan();
@@ -555,8 +609,133 @@ function showPlan(id) {
     L.geoJSON(plan.geometry, { interactive: false, style: STYLE.planHalo, smoothFactor: 0 }),
     L.geoJSON(plan.geometry, { interactive: false, style: STYLE.plan, smoothFactor: 0 })
   ]).addTo(map);
-  const sidebarWidth = document.getElementById('buildingSidebar').offsetWidth || 0;
-  map.flyToBounds(planLayer.getBounds(), { paddingTopLeft: [40, 40], paddingBottomRight: [sidebarWidth + 40, 40], duration: 0.6 });
+  map.flyToBounds(planLayer.getBounds(), { ...mapPadding(), duration: 0.6 });
+}
+
+// Keep what the map flies to clear of the open panels (withSidebar: the building panel is about to open)
+function mapPadding(withSidebar = false) {
+  const sidebar = document.getElementById('buildingSidebar');
+  const assistant = document.getElementById('assistantPanel');
+  const width = (el, open) => open ? el.offsetWidth + 16 : 0;
+  return {
+    paddingTopLeft: [width(assistant, assistant.classList.contains('open')) + 40, 40],
+    paddingBottomRight: [width(sidebar, withSidebar || sidebar.classList.contains('open')) + 40, 40]
+  };
+}
+
+const panelsFitSideBySide = () => window.matchMedia('(min-width: 1100px)').matches;
+
+function setAssistantOpen(open) {
+  const frame = document.getElementById('assistantFrame');
+  if (open && !frame.src) frame.src = frame.dataset.src;   // load the agent's UI only when first opened
+  document.getElementById('assistantPanel').classList.toggle('open', open);
+  document.body.classList.toggle('assistant-open', open);
+  if (open && !panelsFitSideBySide()) closeSidebar();
+  // keep the selected building in view once the panels have finished sliding
+  if (activeId) setTimeout(() => {
+    if (activeId) map.flyToBounds(L.featureGroup(layersOf(activeId)).getBounds(), { ...mapPadding(), maxZoom: 18, duration: 0.6 });
+  }, 380);
+}
+
+// ---------- Assistant mentions ----------
+// The agent's UI posts each reply to this page; the map focuses on the buildings it names.
+// Only identifiers that exist in the official data count: VTJ-PRT, property ID and address,
+// or, when no building is named, a street or postal code area.
+
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+
+// Street name -> ids of the buildings with an address on it
+const STREET_INDEX = [...ADDRESS_INDEX].reduce((index, [key, ids]) => {
+  const street = key.replace(/ \d+[a-zåäö]?$/, '');
+  if (street !== key) index.set(street, [...new Set([...(index.get(street) || []), ...ids])]);
+  return index;
+}, new Map());
+
+function findMentions(text) {
+  const found = new Map();   // building id -> first label that named it
+  const add = (ids, label) => ids.forEach(id => { if (!found.has(id)) found.set(id, label); });
+  const lower = text.toLowerCase();
+
+  for (const [vtj] of text.matchAll(/\b1\d{8}[0-9A-Z]\b/g)) {
+    add(BUILDINGS.filter(b => b.vtj === vtj).map(b => b.id), `VTJ-PRT ${vtj}`);
+  }
+  for (const m of text.matchAll(/\b(\d{3})-?(\d{3})-?(\d{4})-?(\d{4})\b/g)) {
+    const pid = m.slice(1).join('-');
+    add((PARCELS[pid] || []).map(b => b.id), pid);
+  }
+  // Addresses: the number plus up to three words before it, e.g. "Pasilan puistotie 3"
+  for (const m of lower.matchAll(/((?:[a-zåäöé-]+\s+){1,3})(\d+)([a-zåäö]?)(?![\d.,]\d)/g)) {
+    const words = m[1].trim().split(/\s+/);
+    for (let k = 1; k <= words.length; k++) {
+      const street = words.slice(-k).join(' ');
+      const key = [`${street} ${m[2]}${m[3]}`, `${street} ${m[2]}`].find(a => ADDRESS_INDEX.has(a));
+      if (!key) continue;
+      // a VTJ-PRT already named one of the buildings at this address: that one is meant
+      const ids = ADDRESS_INDEX.get(key);
+      if (!ids.some(id => found.has(id))) add(ids, capitalize(key));
+      break;
+    }
+  }
+  if (!found.size) {
+    for (const [street, ids] of STREET_INDEX) {
+      if (new RegExp(`(^|[^a-zåäö])${escapeRegExp(street)}(?![a-zåäö])`).test(lower)) add(ids, capitalize(street));
+    }
+  }
+  if (!found.size) {
+    for (const [code] of text.matchAll(/\b00\d{3}\b/g)) {
+      add(BUILDINGS.filter(b => b.postalCode === code).map(b => b.id), `postal code ${code}`);
+    }
+  }
+  return { ids: [...found.keys()], labels: [...new Set(found.values())] };
+}
+
+function focusMentions(text) {
+  const { ids, labels } = findMentions(text);
+  if (!ids.length) return;
+  clearMentions();
+  // One building with room for both panels: open it like a click would
+  if (ids.length === 1 && panelsFitSideBySide()) {
+    selectBuilding(ids[0]);
+    return;
+  }
+  mentionedIds = new Set(ids);
+  ids.forEach(id => layersOf(id).forEach(l => { if (id !== activeId) buildingLayer.resetStyle(l); l.bringToFront(); }));
+  if (activeId) layersOf(activeId).forEach(l => l.bringToFront());
+  map.flyToBounds(L.featureGroup(ids.flatMap(layersOf)).getBounds(), { ...mapPadding(), maxZoom: 18, duration: 0.6 });
+
+  const shown = labels.slice(0, 3).join(', ') + (labels.length > 3 ? ` +${labels.length - 3} more` : '');
+  document.getElementById('mentionText').textContent =
+    `Assistant mentioned ${shown} · ${ids.length} building${ids.length > 1 ? 's' : ''}`;
+  placeMentionBar();
+  document.getElementById('mentionBar').hidden = false;
+}
+
+function clearMentions() {
+  const ids = [...mentionedIds];
+  mentionedIds = new Set();
+  ids.forEach(id => { if (id !== activeId) layersOf(id).forEach(l => buildingLayer.resetStyle(l)); });
+  document.getElementById('mentionBar').hidden = true;
+}
+
+// Centre the mention bar on the part of the map the panels leave visible
+function placeMentionBar() {
+  const bar = document.getElementById('mentionBar');
+  const { paddingTopLeft: [left], paddingBottomRight: [right] } = mapPadding();
+  const free = map.getSize().x - (left - 40) - (right - 40);
+  bar.style.left = `${left - 40 + free / 2}px`;
+  bar.style.maxWidth = `${Math.max(free - 32, 160)}px`;
+}
+
+// Buildings sharing a property also share its address. The registers give them no letter or
+// number of their own, so each is told apart by its VTJ-PRT and its registered figures.
+function parcelChipText(b) {
+  return [
+    b.storeys && `${b.storeys} storeys`,
+    b.apartments && `${b.apartments} apts`,
+    b.floorArea && `${fmtNum(b.floorArea)} m²`,
+    ...(b.otherAddresses || [])
+  ].filter(Boolean).map(t => ` · ${t}`).join('');
 }
 
 function clearPlan() {
@@ -589,6 +768,22 @@ function closeSidebar() {
 
 function setupEventListeners() {
   document.getElementById('closeSidebarBtn').addEventListener('click', closeSidebar);
+
+  // AI assistant: the agent's own frontend (dev/Docker branch)
+  document.getElementById('assistantBtn').addEventListener('click', () =>
+    setAssistantOpen(!document.getElementById('assistantPanel').classList.contains('open')));
+  document.getElementById('closeAssistantBtn').addEventListener('click', () => setAssistantOpen(false));
+  document.getElementById('clearMentionsBtn').addEventListener('click', clearMentions);
+  const panelWatch = new MutationObserver(placeMentionBar);
+  ['buildingSidebar', 'assistantPanel'].forEach(id =>
+    panelWatch.observe(document.getElementById(id), { attributes: true, attributeFilter: ['class'] }));
+  window.addEventListener('resize', placeMentionBar);
+  // Replies posted by the agent's UI in the iframe (see README): accept only that frame and origin
+  window.addEventListener('message', (e) => {
+    const frame = document.getElementById('assistantFrame');
+    if (e.source !== frame.contentWindow || e.origin !== new URL(frame.dataset.src).origin) return;
+    if (e.data?.type === 'assistant:reply' && typeof e.data.text === 'string') focusMentions(e.data.text);
+  });
   ['pcPrice', 'pcSize', 'pcRooms'].forEach(id => document.getElementById(id).addEventListener('input', updatePriceCheck));
   document.getElementById('buildingSidebar').addEventListener('click', (e) => {
     const btn = e.target.closest('.item-toggle');
@@ -596,6 +791,13 @@ function setupEventListeners() {
     const chip = e.target.closest('[data-select]');
     if (chip && chip.dataset.select !== activeId) selectBuilding(chip.dataset.select);
   });
+  // Hovering a chip lights up that building on the map
+  ['mouseover', 'mouseout'].forEach(type => document.getElementById('buildingSidebar').addEventListener(type, (e) => {
+    const chip = e.target.closest('[data-select]');
+    if (!chip || chip.contains(e.relatedTarget) || chip.dataset.select === activeId) return;
+    layersOf(chip.dataset.select).forEach(l => type === 'mouseover'
+      ? l.setStyle({ weight: 2.5, fillOpacity: 0.7 }) : buildingLayer.resetStyle(l));
+  }));
 
   document.querySelectorAll('.panel-tab').forEach(btn => {
     btn.addEventListener('click', () => {
